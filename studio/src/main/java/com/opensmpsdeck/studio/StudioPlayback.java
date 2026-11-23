@@ -413,6 +413,7 @@ final class StudioPlayback implements AutoCloseable {
         try (var audio = new EditableReader(live)) {
             while (version == generation.get()) {
                 var loop = state.loop;
+                long loopStart = loop == null ? 0 : frame(loop.start());
                 long boundary = end;
                 long seek = live == null ? -1 : live.takeSeek();
                 if (seek >= 0) {
@@ -430,9 +431,8 @@ final class StudioPlayback implements AutoCloseable {
                     continue;
                 }
                 if (loop != null) {
-                    long first = frame(loop.start());
-                    boundary = Math.max(first + 1, frame(loop.end()));
-                    if (cursor >= boundary || cursor < first) cursor = first;
+                    boundary = Math.max(loopStart + 1, frame(loop.end()));
+                    if (cursor >= boundary || cursor < loopStart) cursor = loopStart;
                 }
                 if (live != null) {
                     live.nextFrame = cursor;
@@ -491,7 +491,10 @@ final class StudioPlayback implements AutoCloseable {
                 }
                 var playingSegment = queued.getFirst();
                 long progress = Math.clamp(played - playingSegment.deviceStart(), 0, playingSegment.length());
-                position.accept((playingSegment.projectStart() + progress) / (double) RATE);
+                long projectFrame = playingSegment.projectStart() + progress;
+                // Keep the reported playhead inside the loop while the next block is being prepared.
+                position.accept(loop != null && (projectFrame == boundary || projectFrame == loopStart)
+                        ? loop.start() : projectFrame / (double) RATE);
             }
         }
     }

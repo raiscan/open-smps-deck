@@ -197,7 +197,8 @@ java -jar "$jar" reconstruct view "$work" --start 12 --end 14 --sections \
   note's partials and `--ridges` for numerical trajectories. MCP
   `reconstruct_view` returns a PNG and legend using fields such as `stem`,
   `harmonics`, `ridges`, `sections` and `colorBy`. Studio Analysis has
-  a source picker, **Ridges**, section bands, and role and lane filters.
+  a source picker, **Ridges**, **Auto** contrast, **Sharp** (reassigned)
+  display, section bands, and role and lane filters.
   In **Detail** and **Roles**, scroll to zoom time at the pointer or
   **Shift**-scroll to zoom pitch. Middle-drag or hold **Space** and
   left-drag on the focused plot to pan. Tap **Space** to toggle playback
@@ -246,6 +247,8 @@ that reaches roles but drops in allocation has a separate fate and reason.
    `reconstruct_vocal_review` with `workDir`. Scope to a phrase with
    `--phrase ID` (MCP `phrase`). The review includes decoded syllables,
    kept FM1 gates, and per-note contour, harmonic and repeat evidence.
+   Read `pitchDecisions` for automatic retunes, merges and suppressed
+   attacks in the stem register before the configured shift.
    Subharmonic support can expose an RMVPE octave error. Loud, stable
    notes or notes consistent across repeats can be valid register leaps.
 2. Use `reconstruct vocal-render "$work" --phrase ID OUT.wav` or MCP

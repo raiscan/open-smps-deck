@@ -104,6 +104,7 @@ final class ReconstructionVocalLead {
                 ? gson.fromJson(metadata.get("vocalCandidates"), ExternalTranscribers.Evidence[].class)
                 : new ExternalTranscribers.Evidence[]{imported.provenance()};
         String syllableTool = null;
+        ExternalTranscribers.Evidence syllableEvidence = null;
         int[] cleanup = periodic;
         var encoded = metadata.get("f0Midi10ms");
         if (encoded != null && !encoded.isBlank()) {
@@ -130,6 +131,7 @@ final class ReconstructionVocalLead {
             var f0 = tool.metadata().get("f0Cents10ms");
             if ("syllable".equals(tool.metadata().get("vocalMode")) && f0 != null) {
                 syllableTool = tool.tool();
+                syllableEvidence = tool;
                 candidates.put(tool.tool(), notes);
             } else if (f0 != null) {
                 candidates.put(tool.tool(), contourNotes(notes, f0, track.frames()));
@@ -169,6 +171,21 @@ final class ReconstructionVocalLead {
             metadata.put("vocalReference", hasSegmentedF0 ? "stem-periodicity" : "stem-periodicity-with-model-gap-fill");
         }
         var selected = candidates.getOrDefault(best, List.of());
+        List<VocalPitchContinuity.Decision> decisions = List.of();
+        if (syllableEvidence != null && syllableTool.equals(best)) {
+            var selectedMetadata = syllableEvidence.metadata();
+            var boundaries = gson.fromJson(selectedMetadata.get("vocalBoundaries10ms"),
+                    ReconstructionVocalReview.Boundaries.class);
+            if (boundaries != null && boundaries.syllable() != null) {
+                var stable = VocalPitchContinuity.select(selected, track, periodic,
+                        selectedMetadata.get("f0Cents10ms"), boundaries.syllable(), floor);
+                selected = stable.notes();
+                decisions = stable.decisions();
+            }
+        }
+        // Replacing a saved value in place preserves metadata ordering on replay.
+        if (decisions.isEmpty()) metadata.remove(VocalPitchContinuity.DECISIONS);
+        else metadata.put(VocalPitchContinuity.DECISIONS, gson.toJson(decisions));
         int shift = Integer.parseInt(metadata.getOrDefault("vocalRegisterShift", "0"));
         if (shift != 0) selected = selected.stream()
                 .filter(note -> note.pitch() + shift >= 12 && note.pitch() + shift <= 106)
