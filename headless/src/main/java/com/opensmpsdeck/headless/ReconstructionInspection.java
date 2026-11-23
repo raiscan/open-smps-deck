@@ -65,6 +65,7 @@ public final class ReconstructionInspection {
     private final StudioProject project;
     private final TargetGame target;
     private final List<AudioSource> sources;
+    private final ReconstructionStems separatedStems;
     private final List<Overlay> overlays;
     private final List<LayerOverlay> layers;
     private final ReconstructionSections.Result sections;
@@ -82,6 +83,7 @@ public final class ReconstructionInspection {
         this.stockReasons = ReconstructionVoicing.stockReasons(work);
         this.layers = trace.values().stream().flatMap(row -> layerOverlays(row, clock).stream()).toList();
         this.sources = sources(work, score);
+        this.separatedStems = discoverStems(sources);
         var span = new ReconstructionView.Span(0, duration(), TimeBase.source, clock);
         var patches = new HashMap<String, NavigableMap<Double, String>>();
         for (var change : EvidenceNotes.patchChanges(project, span, ReconstructionView.LANES))
@@ -145,6 +147,19 @@ public final class ReconstructionInspection {
     public TargetGame target() { return target; }
     public StudioProject project() { return project; }
     public List<AudioSource> sources() { return sources; }
+    public ReconstructionStems separatedStems() { return separatedStems; }
+
+    private static ReconstructionStems discoverStems(List<AudioSource> sources) {
+        var mix = sources.stream().filter(source -> source.kind() == AudioKind.MIX && !source.projectClock())
+                .findFirst().orElse(null);
+        if (mix == null) return null;
+        try {
+            return ReconstructionStems.open(mix.path());
+        } catch (IOException | IllegalArgumentException invalidSeparation) {
+            // Existing work can still be inspected when a separated input was moved or changed.
+            return null;
+        }
+    }
     public List<Overlay> overlays() { return overlays; }
     public ReconstructionSections.Result sections() { return sections; }
     public List<Part> parts() { return parts; }
@@ -322,23 +337,40 @@ public final class ReconstructionInspection {
      */
     public SpectrumTile spectrum(AudioSource source, double start, double end, int columns, int low, int high,
                                  int rowsPerSemitone, boolean reassigned) throws IOException {
+        return spectrum(source, start, end, columns, List.of(new PitchRange(low, high)), rowsPerSemitone, reassigned)
+                .getFirst();
+    }
+
+    public record PitchRange(int low, int high) {}
+
+    /**
+     * Measures several pitch ranges over one time range. They share one audio read
+     * and its decimation, and each tile equals a separate single-range measurement.
+     */
+    public List<SpectrumTile> spectrum(AudioSource source, double start, double end, int columns,
+                                       List<PitchRange> ranges, int rowsPerSemitone, boolean reassigned)
+            throws IOException {
         var span = new ReconstructionView.Span(start, end, TimeBase.source, clock);
         var base = source.projectClock ? TimeBase.project : TimeBase.source;
-        var audio = ReferenceAudio.evidenceRange(source.path, span.seconds(start, base) - EvidenceSpectrum.CONTEXT,
-                span.seconds(end, base) + EvidenceSpectrum.CONTEXT);
+        var audio = new EvidenceSpectrum.Source(ReferenceAudio.evidenceRange(source.path,
+                span.seconds(start, base) - EvidenceSpectrum.CONTEXT, span.seconds(end, base) + EvidenceSpectrum.CONTEXT));
         double[] times = new double[columns];
         for (int x = 0; x < columns; x++) times[x] = span.seconds(start + (end - start) * (x + .5) / columns, base);
-        int rows = Math.max(1, rowsPerSemitone) * (high - low + 1);
-        var spectrum = EvidenceSpectrum.measure(audio, times, low, high, rows, end - start, false, reassigned);
-        var ridges = new ArrayList<Ridge>();
-        for (int column = 0; column < columns; column++) {
-            double sourceTime = start + (end - start) * (column + .5) / columns;
-            for (var peak : spectrum.peaks(column, 3))
-                ridges.add(new Ridge(sourceTime, peak.pitch(), peak.strength()));
+        var tiles = new ArrayList<SpectrumTile>(ranges.size());
+        for (var range : ranges) {
+            int rows = Math.max(1, rowsPerSemitone) * (range.high() - range.low() + 1);
+            var spectrum = audio.measure(times, range.low(), range.high(), rows, end - start, false, reassigned);
+            var ridges = new ArrayList<Ridge>();
+            for (int column = 0; column < columns; column++) {
+                double sourceTime = start + (end - start) * (column + .5) / columns;
+                for (var peak : spectrum.peaks(column, 3))
+                    ridges.add(new Ridge(sourceTime, peak.pitch(), peak.strength()));
+            }
+            float[] dbfs = spectrum.powers();
+            for (int i = 0; i < dbfs.length; i++) dbfs[i] = (float) EvidenceSpectrum.Spectrum.db(dbfs[i]);
+            tiles.add(new SpectrumTile(columns, rows, dbfs, List.copyOf(ridges)));
         }
-        float[] dbfs = spectrum.powers();
-        for (int i = 0; i < dbfs.length; i++) dbfs[i] = (float) EvidenceSpectrum.Spectrum.db(dbfs[i]);
-        return new SpectrumTile(columns, rows, dbfs, List.copyOf(ridges));
+        return tiles;
     }
 
     static List<Overlay> overlay(ReconstructionTrace.Row row, Map<String, NavigableMap<Double, String>> patches,

@@ -92,6 +92,6 @@ final class ReconstructionPolyphonicLead {
         if (changes.isEmpty()) return roles;
         return new ReconstructionRoles.Result(roles.version(), roles.harmonyMaxHz(),
                 roles.notes().stream().map(row -> changes.getOrDefault(row.note().id(), row)).toList(),
-                roles.timeBase(), roles.structureNoteHashes(), roles.lanePins());
+                roles.timeBase(), roles.structureNoteHashes(), roles.lanePins(), roles.repeatNotes());
     }
 }

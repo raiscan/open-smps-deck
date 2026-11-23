@@ -117,6 +117,10 @@ final class ReconstructionEditor implements AutoCloseable {
     private final List<ProjectWatcher> watchers = new ArrayList<>();
     private final ReconstructionDraft draft;
     private ReconstructionTransport liveTransport;
+    Runnable onCompare = () -> {};
+    Runnable onJournalState = () -> {};
+    private int branchCount;
+    private final Map<JsonArray, JsonArray> branchJournals = new LinkedHashMap<>();
     private ReconstructionLivePreview live;
     private String liveUnavailable;
     private JsonArray liveBase;
@@ -366,6 +370,42 @@ final class ReconstructionEditor implements AutoCloseable {
     VBox rolesInspector() { return roleInspector; }
     VBox notesInspector() { return noteInspector; }
     TabPane reviewInspector() { return tabs; }
+
+    Revision branchRevision() { return snapshot.revision(); }
+
+    boolean readyForBranch() {
+        return editable() && !liveSaving && !preparingLive && !draft.pending();
+    }
+
+    void branchCount(int count) {
+        branchCount = count;
+        updateControls();
+    }
+
+    boolean auditionBranch(ReconstructionLivePreview.Prepared variant, String label) {
+        var playhead = liveTransport.liveEdit();
+        if (!readyForBranch() || playhead == null) return false;
+        endComparison(true);
+        liveGeneration++; // Invalidate a legacy A/B still preparing.
+        return liveTransport.compareLive(playhead, variant, label);
+    }
+
+    void applyBranch(Revision expected, JsonArray entries) {
+        if (!readyForBranch() || !expected.equals(snapshot.revision())) {
+            status.accept("Main changed · refresh the merge and finish any pending changes");
+            return;
+        }
+        var merged = accepted(entries);
+        if (merged.equals(draft.entries())) return;
+        branchJournals.put(draft.entries(), expected.entries());
+        branchJournals.put(merged, entries.deepCopy());
+        draft.change(next -> {
+            next.asList().clear();
+            merged.asList().forEach(next::add);
+        });
+        journalChanged();
+        if (liveTransport.liveEdit() == null) apply(null);
+    }
 
     void initializeInspectors() {
         noteTitle.getStyleClass().add("inspector-title");
@@ -835,7 +875,7 @@ final class ReconstructionEditor implements AutoCloseable {
                 }
             }
         }
-        return new NoteDraft(forApply(snapshot.revision().entries(), entries), velocities);
+        return new NoteDraft(journalForDraft(snapshot.revision().entries(), entries), velocities);
     }
 
     private int pendingVelocity(Overlay note, int fallback) {
@@ -1514,6 +1554,22 @@ final class ReconstructionEditor implements AutoCloseable {
         return entries;
     }
 
+    private JsonArray journalForDraft(JsonArray journal, JsonArray local) {
+        var branch = branchJournals.get(local);
+        if (branch != null && branchJournals.containsValue(journal)) return branch.deepCopy();
+        var combined = forApply(journal, local);
+        if (branchJournals.isEmpty()) return combined;
+        // Branch plans may intentionally reorder inherited intents. Keep their order
+        // while preserving unrelated proposals that arrived after the plan.
+        var ordered = new JsonArray();
+        var active = local.iterator();
+        for (var entry : combined) {
+            if (ReconstructionProposals.isInactive(entry)) ordered.add(entry);
+            else ordered.add(active.next());
+        }
+        return ordered;
+    }
+
     static JsonArray forApply(JsonArray journal, JsonArray local) {
         var byId = new LinkedHashMap<String, JsonElement>();
         for (var entry : local) byId.put(text(entry, "id", ""), entry);
@@ -1673,7 +1729,7 @@ final class ReconstructionEditor implements AutoCloseable {
                         });
     }
 
-    private static String proposalAction(JsonObject edit) {
+    static String proposalAction(JsonObject edit) {
         String operation = text(edit, "op", "Edit notes");
         return switch (operation) {
             case "setNote" -> {
@@ -1929,6 +1985,7 @@ final class ReconstructionEditor implements AutoCloseable {
     private void compareLive(String label, ExecutorService executor, BuildComparison builder) {
         var edit = comparisonPlayhead();
         if (edit == null) return;
+        onCompare.run();
         endComparison(true);
         var expected = snapshot.revision();
         var built = liveBase;
@@ -2177,7 +2234,7 @@ final class ReconstructionEditor implements AutoCloseable {
         preparingLive = true;
         var expected = snapshot.revision();
         boolean local = request.author() == null;
-        var entries = local ? forApply(expected.entries(), request.entries()) : expected.entries();
+        var entries = local ? journalForDraft(expected.entries(), request.entries()) : expected.entries();
         var reconstruction = Objects.equals(liveVoiceJournal, expected.voices()) ? live : null;
         var unavailable = reconstruction == null && live != null ? "Voice assignments changed" : liveUnavailable;
         worker.execute(() -> {
@@ -2217,7 +2274,7 @@ final class ReconstructionEditor implements AutoCloseable {
         var request = candidate.request();
         var expected = snapshot.revision();
         boolean local = request.author() == null;
-        var entries = local ? forApply(expected.entries(), request.entries()) : expected.entries();
+        var entries = local ? journalForDraft(expected.entries(), request.entries()) : expected.entries();
         var built = liveBase;
         liveSaving = true;
         canonicalWorker.execute(() -> {
@@ -2361,6 +2418,7 @@ final class ReconstructionEditor implements AutoCloseable {
                 : externalError ? "Fix the invalid external edits to continue."
                 : draft.pending() ? "Rebuild needed · Apply & rebuild to hear pending changes."
                 : unbuilt || externalUnbuilt ? "Apply & rebuild to include the saved edits in exports."
+                : branchCount > 0 ? "Review " + branchCount + (branchCount == 1 ? " edit branch" : " edit branches")
                 : proposalCount > 0 ? "Open Review · " + proposalCount
                         + (proposalCount == 1 ? " agent proposal to review" : " agent proposals to review")
                 : snapshot.inspection().project() == null ? "Check which voices are assigned to your notes."
@@ -2372,6 +2430,7 @@ final class ReconstructionEditor implements AutoCloseable {
         var edit = journal.getSelectionModel().getSelectedItem();
         remove.setDisable(!editing || edit == null || edit.index() < 0);
         reviseEdit.setDisable(remove.isDisabled());
+        onJournalState.run();
     }
 
     private void history(boolean forward) {
@@ -2431,7 +2490,7 @@ final class ReconstructionEditor implements AutoCloseable {
         }
         setBusy();
         var expected = snapshot.revision();
-        var intents = forApply(expected.entries(), draft.entries());
+        var intents = journalForDraft(expected.entries(), draft.entries());
         var built = liveBase;
         worker.execute(() -> {
             JsonObject diff = null;
@@ -2478,7 +2537,7 @@ final class ReconstructionEditor implements AutoCloseable {
         if (closed) return;
         busy = false;
         if (diff != null) {
-            var published = next != null ? next.revision().entries() : forApply(snapshot.revision().entries(), draft.entries());
+            var published = next != null ? next.revision().entries() : journalForDraft(snapshot.revision().entries(), draft.entries());
             draft.applied(accepted(published));
             externalUnbuilt = false;
             comparison.setText(summary(diff));
@@ -2610,6 +2669,7 @@ final class ReconstructionEditor implements AutoCloseable {
                             .anyMatch(entry -> !incoming.contains(entry)
                                     && local.asList().stream().anyMatch(edit -> text(edit, "id", "").equals(text(entry, "id", ""))));
                     if (draft.adopt(accepted(incoming), sectionsChanged || superseded || acceptedChanged && draft.pending())) {
+                        if (sectionsChanged || !accepted(previous).equals(accepted(incoming))) branchJournals.clear();
                         external = null;
                         if (rebuilt) externalUnbuilt = false;
                         else if (acceptedChanged) externalUnbuilt = true;
@@ -2668,6 +2728,7 @@ final class ReconstructionEditor implements AutoCloseable {
             externalUnbuilt = !accepted(snapshot.revision().entries()).equals(accepted(external.revision().entries()))
                     || !Objects.equals(snapshot.revision().voices(), external.revision().voices());
             draft.discard(accepted(external.revision().entries()));
+            branchJournals.clear();
             var previous = accepted(snapshot.revision().entries());
             var next = external;
             boolean journalsOnly = snapshot.inspection() == next.inspection();

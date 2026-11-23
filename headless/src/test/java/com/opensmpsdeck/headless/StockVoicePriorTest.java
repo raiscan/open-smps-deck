@@ -26,12 +26,18 @@ class StockVoicePriorTest {
         assertEquals(new InstrumentCatalogue.FmUsage(2, 64, 66, 66, 18, "chord"), usage);
     }
 
-    @Test void boundedPreferenceBreaksNearTiesAndStrongerAcousticsWin() {
+    @Test void preferenceSettlesOnlyExactAcousticTies() {
         var original = new VoiceFit.Candidate("plain", new float[]{1, 1, 1, 1});
-        var preferred = new VoiceFit.Candidate("preferred", new float[]{1, 1.001f, 1, 1.001f}, .04);
         var fit = new VoiceFit(new float[]{1, .9f, 1, .9f}, 2, List.of(original), Set.of());
-        assertTrue(fit.trial(0, original).fit() < fit.trial(0, preferred).fit());
-        assertTrue(fit.select(0, List.of(preferred), 0));
+        // A preferred patch that fits slightly worse does not displace the incumbent.
+        var preferred = new VoiceFit.Candidate("preferred", new float[]{1, 1.001f, 1, 1.001f}, .04);
+        assertFalse(fit.select(0, List.of(preferred), 0));
+        assertEquals("plain", fit.selection(0).candidate().id());
+        // An identical spectrum with a preference wins the tie.
+        var named = new VoiceFit.Candidate("named", new float[]{1, 1, 1, 1}, .04);
+        assertTrue(fit.select(0, List.of(named), 0));
+        assertEquals("named", fit.selection(0).candidate().id());
+        // A better acoustic fit wins regardless of preference.
         var accurate = new VoiceFit.Candidate("accurate", new float[]{1, .9f, 1, .9f});
         assertTrue(fit.select(0, List.of(accurate), 0));
         assertEquals("accurate", fit.selection(0).candidate().id());

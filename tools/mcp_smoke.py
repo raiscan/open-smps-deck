@@ -177,7 +177,7 @@ for stem in stems:
         tools = rpc.request("tools/list")["tools"]
         expected = set("""
             transcribers_list separators_list separate reconstruct_import reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
-            reconstruct_audition reconstruct_vibrato_review reconstruct_vocal_review reconstruct_vocal_render reconstruct_part_render reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_edit reconstruct_sections reconstruct_voices
+            reconstruct_audition reconstruct_vibrato_review reconstruct_vocal_review reconstruct_vocal_render reconstruct_part_render reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_branch reconstruct_edit reconstruct_sections reconstruct_voices
             artifact_read artifact_write project_validate project_export reconstruct_rerun package_validate package_inspect rom_patch
             render_clip render_compare notes_list notes_add notes_resolve reference_add
             catalog_search catalog_audition bench_compare rom_list rom_set
@@ -349,6 +349,14 @@ for stem in stems:
         assert manifest["inputs"]["midi"]["sha256"] == hashlib.sha256(Path(inputs["midi"]).read_bytes()).hexdigest()
         trace = rpc.call("reconstruct_trace", workDir=work, start=0, end=2, lane="FM1")["notes"]
         assert trace and all(row["voiced"][0]["evidence"] == "assembled" for row in trace)
+        branch = rpc.call("reconstruct_branch", workDir=work, action="create", name="smoke", author="agent fixture")
+        assert branch["parent"]["revision"] and branch["edits"] == []
+        build = rpc.call("reconstruct_run", workDir=work, branch="smoke")
+        assert Path(build["workDir"]).is_relative_to(Path(work) / "edits" / "builds")
+        assert rpc.call("reconstruct_stage", workDir=work, stage="assemble", branch="smoke") == build
+        assert rpc.call("reconstruct_trace", workDir=work, branch="smoke")["notes"]
+        assert rpc.call("reconstruct_branch", workDir=work, action="diff", name="smoke")["changes"] == []
+        rpc.call("reconstruct_branch", workDir=work, action="delete", name="smoke")
         clusters = rpc.call("reconstruct_trace", workDir=work, start=0, end=2, part=0, byOnset=True)["clusters"]
         assert clusters and all("sourceStart" in cluster and "projectStart" in cluster for cluster in clusters)
         target = trace[0]["id"]

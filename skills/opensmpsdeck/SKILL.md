@@ -30,6 +30,24 @@ Check live audition latency and full-rebuild parity with
 Use a complete edit journal and the saved reconstruction target. This probe
 renders PCM in memory and opens no audio line.
 
+## Work on a shared reconstruction branch
+
+Create a branch with `reconstruct branch create "$work" agent-pass --author "AGENT MODEL"`.
+Write intents with `reconstruct edit "$work" --branch agent-pass add --file BATCH.json`.
+Build with `reconstruct run "$work" --branch agent-pass` and inspect with
+`reconstruct branch diff "$work" agent-pass --json`. Add `--branch agent-pass`
+to describe, trace, assemble and render. The result stays isolated under
+the shared work directory. Keep build, diff and render outputs private.
+
+Rebase after main's journal changes. To combine work, use
+`reconstruct branch merge "$work" agent-pass human-pass --into review --dry-run`.
+Review direct and downstream conflicts, then select complete intents with
+`--parts`, `--span` (source seconds), `--groups` or `--edits`.
+Use `branch import "$work" agent-pass COPY` for a journal already edited in a copy.
+In MCP use `reconstruct_branch` with an `action` and `workDir`, and pass
+`branch` to `reconstruct_run`, `reconstruct_describe` and `reconstruct_trace`.
+[Branch CLI and storage](../../docs/architecture/edit-branches.md)
+
 ## Notes pasted from Studio
 
 Read `opensmpsdeck-notes v1` as line-oriented text with JSON objects on
@@ -170,6 +188,10 @@ java -jar "$jar" reconstruct view "$work" --start 12 --end 14 --sections \
   `--by-onset` groups nearby attacks by part. MCP `reconstruct_trace` takes
   `byOnset: true`. In Studio, click a note or lane gate to inspect its trace
   and expand **Raw trace JSON**.
+- **Repeat consensus** repairs supported gaps in audio-only tonal stems.
+  Inspect a recovered note in Trace under `structure.repeatConsensus` for its
+  aligned references and local pitch evidence. Pattern lanes prefer the same
+  placement across repeats while existing edits keep their precedence.
 - **Held notes** appear in describe and trace when a mapped stem sustains
   through a missing, shortened, silent or heavily decayed chip gate. Use
   `reconstruct proposals list WORK_DIR --group held-notes` for review
@@ -261,7 +283,7 @@ In MCP, read and write the full
 `voicing` artifact with `artifact_read` and `artifact_write`.
 
 For isolated S3K parts, the FM fit uses catalogue voice names and observed
-retail register and role as bounded preferences. Rescan the S3K ROM with
+retail register and role only to settle acoustic ties. Rescan the S3K ROM with
 `catalog scan` to include retail usage. Inspect `patchReason` in `voicing`,
 `stockVoiceChoices` in `reconstruct describe "$work" --json` or MCP
 `reconstruct_describe`, or **Automatic FM fit** on a selected FM note in

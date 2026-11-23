@@ -383,8 +383,11 @@ final class LeadEffectMatcher {
         }
 
         Spectrum(int bins) {
-            this(new SpectrumPlan(bins));
+            this(PLANS.computeIfAbsent(bins, SpectrumPlan::new));
         }
+
+        // Plans are immutable twiddle tables, so transforms of one size share them.
+        private static final java.util.Map<Integer, SpectrumPlan> PLANS = new java.util.concurrent.ConcurrentHashMap<>();
 
         private Spectrum(SpectrumPlan plan) {
             this.plan = plan;
@@ -425,6 +428,20 @@ final class LeadEffectMatcher {
             java.util.Arrays.fill(imag, 0);
             for (int i = Math.max(0, -start); i < Math.min(window.length, mono.length - start); i++)
                 real[Integer.reverse(i) >>> plan.shift] = mono[start + i] * window[i];
+            fft();
+        }
+
+        /**
+         * Transforms two real windowed slices at once: the first in the real part,
+         * the second in the imaginary part.
+         */
+        void transformPair(float[] mono, int first, double[] firstWindow, int second, double[] secondWindow) {
+            java.util.Arrays.fill(real, 0);
+            java.util.Arrays.fill(imag, 0);
+            for (int i = Math.max(0, -first); i < Math.min(firstWindow.length, mono.length - first); i++)
+                real[Integer.reverse(i) >>> plan.shift] = mono[first + i] * firstWindow[i];
+            for (int i = Math.max(0, -second); i < Math.min(secondWindow.length, mono.length - second); i++)
+                imag[Integer.reverse(i) >>> plan.shift] = mono[second + i] * secondWindow[i];
             fft();
         }
 

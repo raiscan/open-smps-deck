@@ -238,7 +238,7 @@ final class ReconstructionEdits {
         require(id.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,95}"), at + ".id", "expected 1–96 letters, digits, dots, underscores or hyphens");
         string(json, "reason", at);
         Kind kind = choice(Kind.class, json, "op", at);
-        var allowed = new LinkedHashSet<>(Set.of("id", "reason", "op", "timeBase", "author", "status", "group", "evidence", "proposalRevised"));
+        var allowed = new LinkedHashSet<>(Set.of("id", "reason", "op", "timeBase", "author", "status", "group", "evidence", "proposalRevised", "provenance"));
         allowed.addAll(switch (kind) {
             case insertNote -> List.of("part", "start", "end", "pitch", "velocity", "lane", "role");
             case deleteNote -> List.of("noteId", "selector");
@@ -271,6 +271,14 @@ final class ReconstructionEdits {
             require(json.has("author") && string(json, "author", at).equals("agent"),
                     at + ".author", "proposed edits require an agent author");
         if (json.has("group")) string(json, "group", at);
+        if (json.has("provenance")) {
+            require(json.get("provenance").isJsonObject(), at + ".provenance", "expected an object");
+            var source = json.getAsJsonObject("provenance");
+            fields(source, at + ".provenance", Set.of("branch", "author", "group"));
+            string(source, "branch", at + ".provenance");
+            string(source, "author", at + ".provenance");
+            if (source.has("group")) string(source, "group", at + ".provenance");
+        }
         if (json.has("proposalRevised"))
             require(json.get("proposalRevised").equals(new com.google.gson.JsonPrimitive(true)),
                     at + ".proposalRevised", "expected true");
@@ -1268,7 +1276,7 @@ final class ReconstructionEdits {
         }
         return new ReconstructionRoles.Result(roles.version(), roles.harmonyMaxHz(), decisions.values().stream()
                 .sorted(java.util.Comparator.comparing(ReconstructionRoles.Decision::note, NOTE_ORDER)).toList(),
-                roles.timeBase(), roles.structureNoteHashes(), pins.isEmpty() ? null : pins);
+                roles.timeBase(), roles.structureNoteHashes(), pins.isEmpty() ? null : pins, roles.repeatNotes());
     }
 
     private static boolean matchesRole(Intent edit, Role incoming, Role target) {

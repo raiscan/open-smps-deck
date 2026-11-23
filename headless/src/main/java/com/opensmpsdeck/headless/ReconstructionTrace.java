@@ -53,7 +53,8 @@ public final class ReconstructionTrace {
     record NoteAt(Note note, Timing timing) {}
     record Origin(NoteAt note, String provenance, ExternalTranscribers.Evidence transcriber,
                   String parentNoteId, List<ReconstructionPitchRefinement.Change> pitchRefinement) {}
-    record Structure(NoteAt effective, List<ReconstructionStructure.Correction> corrections) {}
+    record Structure(NoteAt effective, List<ReconstructionStructure.Correction> corrections,
+                     @ReconstructionStages.Nullable ReconstructionRepeatConsensus.Member repeatConsensus) {}
     record Roles(NoteAt effective, ReconstructionRoles.Role role, String reason, String mergedInto, Double preLegatoEnd, List<String> mergedFrom) {}
     record Allocation(NoteAt effective, ReconstructionRoles.Role role, List<String> expectedLanes, String lane,
                       Timing placement, ReconstructionAllocation.Outcome outcome, String reason, String mergedInto,
@@ -571,7 +572,8 @@ public final class ReconstructionTrace {
             var layers = played.layers.get(id);
             rows.add(new Row(id, anchor.note.part(), part == null ? "" : part.name(), anchor.note.pitch(), anchor.timing,
                     gate, origin, written, scoreDecision, effective == null && fixes.isEmpty() ? null
-                            : new Structure(effective, fixes),
+                            : new Structure(effective, fixes, structure == null || structure.repeatNotes() == null
+                            ? null : structure.repeatNotes().get(id)),
                     roleTrace, placement, List.copyOf(voiced), fate.status, fate.stage, reason,
                     edits.isEmpty() ? null : List.copyOf(edits), reason.equals(fate.reason) ? null : fate.reason, identity, layers, played.policyDecisions.get(id), findings.get(id)));
         }
