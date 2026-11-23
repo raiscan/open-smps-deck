@@ -33,6 +33,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static com.opensmpsdeck.headless.ReconstructionRoles.Role.drums;
 
@@ -45,6 +46,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ReconstructionDrumsTest {
     @TempDir Path directory;
+    @Test void stockVoteMustAlsoCompeteOnClassAndReuse() {
+        var regular = new ReconstructionDrums.Candidate("regular", "a", "regular", 4, .10, null, 0., null);
+        var vote = new ReconstructionDrums.Candidate("vote", "b", "vote", 6, .11, null, .05, null);
+        assertEquals(.06, ReconstructionDrums.requiredVoteMargin(vote, regular, .10, true, Set.of(), Map.of()), 1e-9);
+        assertEquals(.18, ReconstructionDrums.requiredVoteMargin(vote, regular, .10, true,
+                Set.of(), Map.of("vote", 1)), 1e-9);
+    }
+
     @Test void tonalEnvelopeCannotOpenTheNoiseChannelInADrumSolo() throws Exception {
         byte[] raw = {0x40, (byte) 0x80};
         var mask = new S3kRenderer.ChannelMask(0x3f, 0x7);

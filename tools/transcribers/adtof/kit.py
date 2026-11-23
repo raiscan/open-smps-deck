@@ -1,5 +1,6 @@
 """Experimental song-local percussion retrieval on the source clock."""
 import base64
+from bisect import bisect_left
 from collections import Counter
 from math import gcd
 
@@ -12,6 +13,11 @@ HOP = 96
 FFT = 256
 FRAMES = 8
 BANDS = 24
+MIN_CLUSTER_SCORE = .80
+MIN_CLUSTER_SEEDS = 4
+CLUSTER_SIMILARITY = .90
+ADDITION_SIMILARITY = .945
+OCCUPANCY_SECONDS = .040
 # Aggregate adjacent frequency bins on a log-spaced scale, retaining bass bins.
 EDGES = np.unique(np.rint(np.geomspace(1, FFT // 2 + 1, BANDS + 1)).astype(int))
 WINDOW = np.hanning(FFT).astype(np.float32)
@@ -90,7 +96,22 @@ def stock(catalogue):
     return np.stack(templates), ids
 
 
-def retrieve(stem, mix, rows, catalogue, recovered_hats=()):
+def stock_match(proto, pitch, templates, ids):
+    projection = templates @ proto
+    missing = np.maximum(templates * projection[:, None] - proto, 0)
+    scores = projection * (1 - (missing ** 2).sum(axis=1) / np.maximum(projection ** 2, 1e-8))
+    # C0 is an accented hybrid. Demand a clear advantage over alternatives.
+    scores -= np.array([.08 if name == "DAC C0" else 0 for _, name, _ in ids])
+    close = np.flatnonzero(scores >= scores.max() - .008)
+    compatible = [i for i in close if (ids[i][0] is None) == (pitch in (42, 44, 46))]
+    best = max(compatible if compatible else close, key=scores.__getitem__)
+    variant, _, _ = ids[best]
+    if scores[best] < MIN_CLUSTER_SCORE or (variant is None and pitch not in (42, 44, 46)):
+        return None
+    return variant or "PSG-noise", float(scores[best])
+
+
+def retrieve(stem, rows, catalogue, recovered_hats=(), *, additions=False):
     spec = audio_spectrum(stem)
     peaks, flux = attacks(spec)
     templates, ids = stock(catalogue)
@@ -104,7 +125,7 @@ def retrieve(stem, mix, rows, catalogue, recovered_hats=()):
         frame = lo + int(np.argmax(flux[lo:hi]))
         sample = descriptor(spec, frame)
         sims = [float(sample @ group["first"]) for group in groups]
-        if sims and max(sims) >= .90:
+        if sims and max(sims) >= CLUSTER_SIMILARITY:
             index = int(np.argmax(sims))
         elif len(groups) < 64 and sample.any():
             index = len(groups)
@@ -120,72 +141,33 @@ def retrieve(stem, mix, rows, catalogue, recovered_hats=()):
         group["votes"][int(pitch)] += 1
     prototypes, learned, votes, clusters = [], [], {}, []
     for group in groups:
-        if group["votes"].total() < 4:
+        if group["votes"].total() < MIN_CLUSTER_SEEDS:
             continue
         proto = unit(np.median(group["examples"], axis=0))
-        projection = templates @ proto
-        missing = np.maximum(templates * projection[:, None] - proto, 0)
-        scores = projection * (1 - (missing ** 2).sum(axis=1) / np.maximum(projection ** 2, 1e-8))
-        # C0 is an accented hybrid. Demand a clear advantage over alternatives.
-        scores -= np.array([.08 if name == "DAC C0" else 0 for _, name, _ in ids])
         pitch = group["votes"].most_common(1)[0][0]
-        close = np.flatnonzero(scores >= scores.max() - .008)
-        compatible = [i for i in close if (ids[i][0] is None) == (pitch in (42, 44, 46))]
-        best = max(compatible if compatible else close, key=scores.__getitem__)
-        variant, _, _ = ids[best]
-        if variant is None:
-            pitch = 42
-        votes.setdefault(pitch, Counter())[variant or "PSG-noise"] += group["votes"].total()
+        match = stock_match(proto, pitch, templates, ids)
+        if match is None:
+            continue
+        variant, score = match
+        votes.setdefault(pitch, Counter())[variant] += group["votes"].total()
         clusters.append({"seedOnsets": len(group["frames"]), "pitch": pitch,
-                         "stock": variant or "PSG-noise", "score": float(scores[best])})
+                         "stock": variant, "score": score})
         prototypes.append(proto)
-        learned.append((pitch, variant))
+        learned.append(pitch)
     output = list(rows)
-    mix_additions = []
-    occupied = {}
-    for time, pitch, _ in rows:
-        occupied.setdefault(pitch, set()).add(round(time * RATE / HOP))
-    def search(source, candidates, bank, labels, mix_only):
-        if not len(bank):
-            return
-        bank = np.stack(bank)
-        for frame in candidates:
-            similarities = bank @ descriptor(source, frame)
-            index = int(np.argmax(similarities))
-            pitch, variant = labels[index]
-            if similarities[index] < (.975 if mix_only else .945):
+    if additions and prototypes:
+        bank = np.stack(prototypes)
+        occupied = sorted(time for time, _, _ in rows)
+        for frame in peaks:
+            time = frame * HOP / RATE
+            index = bisect_left(occupied, time)
+            if any(abs(previous - time) <= OCCUPANCY_SECONDS + 1e-9 for previous in occupied[max(0, index - 1):index + 1]):
                 continue
-            previous = occupied.setdefault(pitch, set())
-            if any(frame + offset in previous for offset in range(-5, 6)):
-                continue
-            output.append([frame * HOP / RATE, pitch, 96])
-            previous.add(frame)
-            if mix_only:
-                mix_additions.append(frame * HOP / RATE)
-    search(spec, peaks, prototypes, learned, False)
-    if mix and mix.is_file() and not stem.samefile(mix):
-        mixture = audio_spectrum(mix)
-        # In the mix compare against the same song and observation path. Keep a
-        # mix prototype only if independent, alternating examples agree.
-        mix_peaks, mix_flux = attacks(mixture)
-        bank, labels = [], []
-        for group in groups:
-            if group["votes"].get(42, 0) < max(4, .8 * group["votes"].total()):
-                continue
-            examples = []
-            for frame in sorted(group["frames"]):
-                if frame + FRAMES >= len(mixture):
-                    continue
-                lo, hi = max(0, frame - 2), min(len(mix_flux), frame + 3)
-                aligned = lo + int(np.argmax(mix_flux[lo:hi]))
-                examples.append(descriptor(mixture, aligned))
-            if len(examples) < 4:
-                continue
-            first = unit(np.median(examples[::2], axis=0))
-            second = unit(np.median(examples[1::2], axis=0))
-            if first @ second >= .94:
-                bank.append(unit(first + second))
-                labels.append((42, None))
-        search(mixture, mix_peaks, bank, labels, True)
+            similarities = bank @ descriptor(spec, frame)
+            best = int(np.argmax(similarities))
+            if similarities[best] >= ADDITION_SIMILARITY:
+                output.append([time, learned[best], 96])
+                occupied.insert(index, time)
     return sorted(output), {f"kitVariant.{p}": v.most_common(1)[0][0] for p, v in votes.items()} | {
-        "kitClusters": clusters, "mixOnlyHatOnsets": mix_additions, "kitPrototypes": len(prototypes), "kitAdditions": len(output) - len(rows)}
+        "kitClusters": clusters, "kitPrototypes": len(prototypes),
+        "kitEventAdditionsEnabled": additions, "kitAdditions": len(output) - len(rows)}

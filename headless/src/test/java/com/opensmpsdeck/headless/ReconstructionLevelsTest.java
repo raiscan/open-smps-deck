@@ -102,7 +102,7 @@ class ReconstructionLevelsTest {
         var sample = DacSample.of("synthetic-stock", "Synthetic stock fixture", 12, pcm).withOrigin(AssetOrigin.stock(ref));
         var evidence = new ReconstructionDrums.Evidence("stem", ReconstructionTimeMap.of(score).timeBase(),
                 List.of(), null, List.of(), null, ReconstructionDrums.Source.stock, "test",
-                null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null);
         var drum = new Instrument(0, 36, null, new ReconstructionDrums.Selection(null, sample.rate(), sample, evidence));
         var dac = new Lane(Role.drums, null, List.of(), 1, WRITTEN, DRY, DEFAULT, DEFAULT, DEFAULT, List.of(drum));
         var normal = lane(Role.melody, variant, 1);

@@ -387,6 +387,13 @@ public final class InstrumentCatalogue {
                 .map(Occurrence::fmUsage).filter(Objects::nonNull).distinct().toList();
     }
 
+    /** Saved detector votes can name a variant absent from the active catalogue. */
+    java.util.Optional<Match> stockVariant(String id, TargetGame target) {
+        var variant = variants.get(id);
+        if (variant == null || variant.target() != target) return java.util.Optional.empty();
+        return java.util.Optional.of(new Match(asset(variant.assetId()), variant));
+    }
+
     public Match match(String id) {
         return match(id, null);
     }
