@@ -1012,6 +1012,22 @@ inline repeated content, positional stopped channels and local FM voices.
 Native envelope semantics outside the bounded profile, FM6/DAC ownership switching and
 arbitrary control flow remain future work.
 
+### Repeat settings by part
+
+For a pitched audio-only part with a mapped non-vocal stem, add a
+`repeatPolicy` edit. Both fields default to `off`.
+
+```sh
+java -jar "$jar" reconstruct edit "$work" propose '{"id":"bass-repeats","reason":"Recover the repeating bass groove","op":"repeatPolicy","part":1,"fill":"high","lanes":"on"}'
+```
+
+Use `fill` to choose `off`, `low`, `medium`, or `high` sensitivity.
+Use `lanes` to choose `off`, `on` (reuse a free pattern lane), or `strict`
+(allow a supported pattern attack to displace an optional octave double).
+An accepted change rebuilds from `structure`. A branch selection that matches
+a repeat policy includes the whole-part operation, even when selected by
+a time range. See the [repeat evidence and lane rules](../docs/architecture/reconstruction-stages.md#stem-backed-repeat-consensus).
+
 ## Reconstruction edit branches
 
 Use `reconstruct branch create WORK NAME` with a built reconstruction.

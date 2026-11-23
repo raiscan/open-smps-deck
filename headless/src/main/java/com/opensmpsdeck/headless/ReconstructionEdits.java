@@ -27,7 +27,7 @@ final class ReconstructionEdits {
     static final String FILE = "edits.json";
     static final String RESULTS = "edit-results.json";
 
-    enum Kind { insertNote, deleteNote, setNote, splitNote, retrigger, mergeNotes, transpose, setRole, pinLane, unmerge, bend, glide, swapRoles, setVelocity, arpeggio, chordInstrument, voiceEdit, noteVoicing, layer }
+    enum Kind { insertNote, deleteNote, setNote, splitNote, retrigger, mergeNotes, transpose, setRole, pinLane, unmerge, bend, glide, swapRoles, setVelocity, arpeggio, chordInstrument, voiceEdit, noteVoicing, layer, repeatPolicy }
     enum Status { applied, satisfied, orphaned, invalid, conflict }
 
     record Span(double start, double end, String section) {
@@ -61,6 +61,7 @@ final class ReconstructionEdits {
         Stage firstStage() {
             return switch (kind) {
                 case insertNote, deleteNote, setNote, splitNote, retrigger, mergeNotes, transpose, bend, glide, setVelocity -> Stage.TRANSCRIBE;
+                case repeatPolicy -> Stage.STRUCTURE;
                 case setRole, swapRoles, pinLane, unmerge -> Stage.ROLES;
                 case voiceEdit -> Stage.VOICES;
                 case arpeggio, chordInstrument -> Stage.ALLOCATE;
@@ -250,6 +251,7 @@ final class ReconstructionEdits {
             case setRole -> List.of("noteIds", "selector", "span", "part", "pitchMin", "pitchMax", "fromRole", "role", "lane", "selectors", "voice", "others");
             case swapRoles -> List.of("span", "part", "from", "to", "voice");
             case voiceEdit -> List.of("voiceEdit");
+            case repeatPolicy -> List.of("part", "fill", "lanes");
             case layer -> List.of("noteIds", "selector", "selectors", "span", "part", "pitchMin", "pitchMax",
                     "fromRole", "mode", "laneType", "delayFrames", "attenuation", "levelDb", "detune", "octave", "volumeDecay", "policies");
             case noteVoicing -> List.of("noteIds", "instrument", "laneType", "vibrato", "vibratoEnvelope", "modulationOff");
@@ -411,6 +413,10 @@ final class ReconstructionEdits {
                 span = span(json, at, part);
             }
             case voiceEdit -> ReconstructionVoicePlan.reviewEdit(json, at);
+            case repeatPolicy -> {
+                require(part != null, at + ".part", "required");
+                ReconstructionRepeatPolicy.parse(json, at);
+            }
             case noteVoicing -> {
                 ids = noteIds(json, at, 1);
                 ReconstructionNoteVoicing.validate(json, laneType, at);
@@ -1126,7 +1132,7 @@ final class ReconstructionEdits {
         int order = 0;
         for (Intent edit : intents) {
             order++;
-            if (edit.firstStage().ordinal() > Stage.ROLES.ordinal()) continue;
+            if (edit.firstStage() != Stage.TRANSCRIBE && edit.firstStage() != Stage.ROLES) continue;
             var scoreResult = scoreResults.get(edit.id);
             if (edit.kind == Kind.transpose) {
                 if (scoreResult != null && scoreResult.status == Status.applied) {

@@ -404,9 +404,10 @@ public final class ReconstructionLivePreview {
         var journal = ReconstructionReview.parse(entries);
         var suffix = suffix(journal);
         requireRange(start, end, playhead);
-        if (suffix.stream().anyMatch(edit -> edit.firstStage() == ReconstructionStages.Stage.VOICES
+        if (suffix.stream().anyMatch(edit -> edit.firstStage() == ReconstructionStages.Stage.STRUCTURE
+                || edit.firstStage() == ReconstructionStages.Stage.VOICES
                 || edit.firstStage() == ReconstructionStages.Stage.ALLOCATE))
-            throw new RebuildNeeded("This edit needs canonical allocation or voice fitting");
+            throw new RebuildNeeded("This edit needs canonical structure, allocation or voice fitting");
         var edits = new ReconstructionEdits(suffix);
         var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
         var editedScore = edits.bindSections(work, score, structure, ReconstructionStages.Stage.TRANSCRIBE, outcomes)

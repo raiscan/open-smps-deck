@@ -70,6 +70,7 @@ public final class ReconstructionInspection {
     private final List<LayerOverlay> layers;
     private final ReconstructionSections.Result sections;
     private final List<Part> parts;
+    private final List<Part> repeatParts;
     private final Map<String, String> stockReasons;
     private final List<ReconstructionStructure.Bar> bars;
     private final ReconstructionBeatMap beats;
@@ -103,6 +104,7 @@ public final class ReconstructionInspection {
         this.overlays = List.copyOf(notes);
         this.sections = ReconstructionSections.load(work, score);
         this.parts = score.source().parts().stream().map(part -> new Part(part.id(), part.name(), part.drums())).toList();
+        this.repeatParts = parts.stream().filter(part -> ReconstructionRepeatPolicy.supports(score, part.id())).toList();
         this.beats = score.beatMap();
         this.bars = score.usesBeatGrid() ? beats.bars(duration()) : score.bars();
     }
@@ -163,6 +165,14 @@ public final class ReconstructionInspection {
     public List<Overlay> overlays() { return overlays; }
     public ReconstructionSections.Result sections() { return sections; }
     public List<Part> parts() { return parts; }
+    public List<Part> repeatParts() { return repeatParts; }
+
+    public String repeatFillReason(String id) {
+        var row = trace.get(id);
+        if (row == null || row.structure() == null) return null;
+        var repeat = row.structure().repeatConsensus();
+        return repeat == null ? null : repeat.reason();
+    }
 
     public String stockVoiceReason(Overlay note) {
         if (note.lane() == null || !note.lane().startsWith("FM")) return null;

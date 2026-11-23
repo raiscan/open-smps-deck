@@ -192,6 +192,8 @@ final class ReconstructionBranchDiff {
                 if (edit.part() != null) parts.add(edit.part());
                 notes.addAll(edit.noteIds());
                 if (edit.kind() == Kind.insertNote) notes.add(edit.insertedId());
+                if (edit.kind() == Kind.repeatPolicy)
+                    scopes.add(new Scope(edit.part(), new Range(0, clock.sourceDuration())));
                 var explicit = edit.explicitSpan();
                 if (explicit != null && edit.part() != null) scopes.add(new Scope(edit.part(),
                         new Range(edit.toSource(explicit.start(), clock), edit.toSource(explicit.end(), clock))));
@@ -318,6 +320,12 @@ final class ReconstructionBranchDiff {
         effects.forEach(effect -> touched.addAll(effect.notes));
         var old = ReconstructionTrace.read(before);
         var updated = ReconstructionTrace.read(after);
+        var repeatParts = new LinkedHashSet<Integer>();
+        effects.stream().filter(effect -> effect.family.equals("repeatPolicy"))
+                .forEach(effect -> repeatParts.addAll(effect.parts));
+        if (!repeatParts.isEmpty())
+            for (var rows : List.of(old, updated))
+                rows.values().stream().filter(row -> repeatParts.contains(row.part())).forEach(row -> touched.add(row.id()));
         var pcm = pcm(before, after, old, updated, touched);
         var result = new ArrayList<IndirectConflict>();
         var refs = effects.stream().map(Effect::ref).distinct().toList();

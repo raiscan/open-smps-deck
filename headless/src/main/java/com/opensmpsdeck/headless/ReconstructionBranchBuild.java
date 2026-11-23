@@ -56,10 +56,18 @@ final class ReconstructionBranchBuild {
                 Files.copy(work.resolve(relative), output);
                 if (!entry.getValue().equals(ReconstructionCli.contentHash(output))) throw new ReconstructionReview.Changed();
             }
-            // Roles may have pending edits in main, even when the branch changes only assembly.
+            // Main may have pending edits even when the branch changes only assembly.
             var from = ReconstructionReview.firstStage(stage, expected.entries(), entries);
-            var start = from.equals("transcribe") ? from : "roles";
-            ReconstructionReview.parse(entries).write(stage);
+            var edits = ReconstructionReview.parse(entries);
+            boolean repeatPolicy = edits.accepted().intents().stream().anyMatch(
+                    edit -> edit.kind() == ReconstructionEdits.Kind.repeatPolicy)
+                    || ReconstructionEdits.Journal.read(stage).all().stream().anyMatch(
+                    result -> result.op() == ReconstructionEdits.Kind.repeatPolicy);
+            var start = switch (from) {
+                case "transcribe", "structure" -> from;
+                default -> repeatPolicy ? "structure" : "roles";
+            };
+            edits.write(stage);
             var args = new ArrayList<>(List.of("--from", start, stage.toString(), "--keep-voicing",
                     "--overwrite-detached", "--policy-decisions"));
             var roles = ReconstructionTrace.optional(stage, "roles.json", ReconstructionRoles.Result.class);
