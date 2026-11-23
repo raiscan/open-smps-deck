@@ -25,6 +25,11 @@ If the S3K layering preset adds an incompatible envelope on a classic
 target, use `--lane-policy-preset off` on the fresh reconstruction.
 Portable and mod exports default to the saved project target.
 
+Check live audition latency and full-rebuild parity with
+`java -jar "$jar" bench live-edit "$work" "$journal" --target s2 --at 12`.
+Use a complete edit journal and the saved reconstruction target. This probe
+renders PCM in memory and opens no audio line.
+
 ## Notes pasted from Studio
 
 Read `opensmpsdeck-notes v1` as line-oriented text with JSON objects on

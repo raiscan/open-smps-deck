@@ -1,7 +1,7 @@
 # Live reconstruction playback
 
 Studio auditions pitch, gate and supported bend edits throughout an attached
-S3K reconstruction. **Song**, **Section** and **Selection** support live edits
+S3K, S1 or S2 reconstruction. **Song**, **Section** and **Selection** support live edits
 on Chip and on the Chip side of A/B. Voice and Lane use built scoped playback.
 An edit ahead of the playhead is heard on arrival. A loop lets a passed note
 be heard on its next pass. If an unlooped note at or just ahead of the gesture
@@ -44,8 +44,9 @@ listening diagnostics. Without usable saved voicing or a local representation
 of an edit, Studio shows **Rebuild needed** while the canonical replay runs.
 
 Only a checked result publishes the journal under the existing locks and
-revision check. Exports use the last canonical build. Use **Apply & rebuild**
-to publish the current edits to the project, reports and exports. The watcher
+revision check. Export builds the current journal in a private directory when it differs from
+the published build. Every format reads the canonical project from that build.
+Use **Apply & rebuild** to publish edits to the project and reports. The watcher
 adopts accepted disk edits while the draft is clean and labels the source of
 the change. If accepted edits arrive while local edits are unsaved, Studio
 preserves the local draft and offers journal conflict resolution. Proposed
@@ -54,7 +55,8 @@ edits stay silent until auditioned or accepted.
 The A/B controls use the current playhead for history, stock FM voice and
 proposal comparisons. They keep the compared changes in memory until the
 reviewer applies one. Explicit refit uses the stock fitter on the current
-allocation in the background and offers the selected patch as B.
+allocation on a separate worker and offers the selected patch as B. New edits
+supersede an unfinished refit, and editing stays available while it runs.
 
 ## Checkpoints and handoff
 
@@ -73,7 +75,9 @@ it recompiles the song. Before reusing a checkpoint, Studio compares each
 track's executed event bytes and verifies the asset bindings. It relocates
 the next program counter, active return address and loop counter in the
 new bank. A failed proof discards that checkpoint and the suffix. Studio
-rebuilds the missing states from the latest verified checkpoint.
+rebuilds the missing states from the latest verified checkpoint. S1 and S2
+restore snapshots within a revision. An edited classic bank rebuilds its grid
+from the start because cursor relocation is proven only for S3K packing.
 
 The render worker prepares an exact handoff position. The audio worker
 restores it on the open line and switches at the next unqueued block. It
@@ -100,7 +104,7 @@ first-sample comparison uses
 the two revisions at the same project frame. The device cursor measures the audio line boundary. Acoustic output
 delay is outside that measurement.
 
-## Verification and next phase
+## Verification
 
 Synthetic tests compare restored PCM with continuous playback from
 several seeks and checkpoints. They cover compact and linear packing,
@@ -110,9 +114,8 @@ rebuild after independent-bar role edits, deletion and a mixed journal.
 Studio tests use a silent audio line by default and cover late handoffs,
 deletion, undo and adoption of an agent edit on the same line.
 
-Further work can extend the window proof to stem-backed allocation,
-reduce the cost of invalidated checkpoints, and support live playback
-for additional drivers.
+Use [`bench live-edit`](benchmark.md#live-edit-latency-and-parity) to measure
+presentation-aligned replay and verify bank and PCM parity on each target.
 
 [Stage and edit contracts](reconstruction-stages.md) ·
 [Studio review and transport](../user-guide/studio.md#inspect-and-edit-a-reconstruction)

@@ -377,9 +377,13 @@ or press **Esc** to remove it.
 
 ### Audition note edits while playing
 
-In an attached S3K reconstruction, open **Notes** and choose **Chip** or
+In an attached S3K, S1 or S2 reconstruction, open **Notes** and choose **Chip** or
 switch A/B to the Chip side. Play or seek to any part of the song with
 the **Song**, **Section** or **Selection** range.
+
+**Export…** includes current journal edits by rebuilding them privately when
+needed. **Apply & rebuild** publishes the edited arrangement and reports back
+to the work directory.
 
 Drag pitch or length, transpose, draw a supported bend, or change a note's
 velocity, role, lane or voicing. You can also insert, delete, split, merge

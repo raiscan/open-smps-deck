@@ -63,6 +63,23 @@ class CheckpointPlaybackTest {
                 "the executed-prefix proof must reject a cutoff after changed events");
     }
 
+    @Test void classicCheckpointsRestoreAndEditedBanksMatchContinuousPlayback() throws Exception {
+        for (var target : List.of(TargetGame.S1, TargetGame.S2)) {
+            var before = TargetPlayback.prepare(repeatedSong(60).withTarget(target));
+            var after = TargetPlayback.prepare(repeatedSong(61).withTarget(target));
+            var checkpoints = before.checkpoints();
+            verify(before, checkpoints, 540);
+            try (var reader = checkpoints.revise(after, 390).reader();
+                 var resumed = reader.bookmark(375).reader()) {
+                int[] frame = {0};
+                after.render(540, block -> {
+                    int index = frame[0]++;
+                    if (index >= 375) assertArrayEquals(block, resumed.at(index), target + " at " + index);
+                });
+            }
+        }
+    }
+
     private static StudioProject repeatedSong(int finalPitch) {
         var voice = DemoProject.create().voices().getFirst();
         var notes = new ArrayList<NoteEvent>();

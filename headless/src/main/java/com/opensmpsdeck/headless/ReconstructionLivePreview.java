@@ -21,7 +21,7 @@ import static java.nio.file.LinkOption.NOFOLLOW_LINKS;
 import static java.nio.file.StandardOpenOption.CREATE;
 import static java.nio.file.StandardOpenOption.WRITE;
 
-/** An S3K assembly snapshot with frozen allocation and fitted sounds. */
+/** A driver-specific assembly snapshot with frozen allocation and fitted sounds. */
 public final class ReconstructionLivePreview {
     public static final class RebuildNeeded extends IOException {
         RebuildNeeded(String detail) { super(detail); }
@@ -65,8 +65,8 @@ public final class ReconstructionLivePreview {
             remember(work.resolve(file));
         ReconstructionReview.requireRevision(work, revision);
         var project = ReconstructionReview.requireAttached(work, false);
-        if (project == null || project.project().target() != TargetGame.S3K)
-            throw new RebuildNeeded("Build an attached S3K reconstruction first");
+        if (project == null || project.project().nativeProgram() != null)
+            throw new RebuildNeeded("Build an attached editable reconstruction first");
         score = ReconstructionStages.readScore(work.resolve("score.json"));
         clock = ReconstructionTimeMap.of(score);
         structure = ReconstructionStages.readStructure(work.resolve("structure.json"), score);
@@ -92,7 +92,7 @@ public final class ReconstructionLivePreview {
             throw new RebuildNeeded("The built song uses bank size reductions");
         var cataloguePath = Path.of(score.inputs().catalogue());
         remember(cataloguePath);
-        catalogue = InstrumentCatalogue.openReconstruction(cataloguePath, TargetGame.S3K);
+        catalogue = InstrumentCatalogue.openReconstruction(cataloguePath, score.profile().game());
         var ordered = new ReconstructionAllocation.Result(allocation.version(), allocation.notes().stream()
                 .sorted(java.util.Comparator.comparingInt(entry -> entry.startTick() == null
                         ? clock.startTick(entry.note()) : entry.startTick())).toList());
@@ -229,10 +229,12 @@ public final class ReconstructionLivePreview {
     }
 
     private static boolean sameAudio(TargetPlayback before, TargetPlayback after) {
+        if (before.target() != after.target()) return false;
         var left = before.compiled();
         var right = after.compiled();
         if (!left.envelopes().equals(right.envelopes()) || !left.samples().equals(right.samples())) return false;
         if (Arrays.equals(left.song(), right.song())) return true;
+        if (before.target() != TargetGame.S3K) return false;
         var prefix = S3kProgramPrefix.between(left, right);
         return prefix != null && prefix.equivalent();
     }

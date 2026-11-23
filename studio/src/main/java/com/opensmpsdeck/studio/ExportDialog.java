@@ -43,19 +43,26 @@ final class ExportDialog {
 
     static void show(Window owner, StudioProject project, Path projectPath, Path work, TargetGame fallbackTarget,
                      RomLibrary library, Executor worker, Consumer<String> status) {
-        show(owner, project, projectPath, work, fallbackTarget, library, worker, status, false);
+        show(owner, project, projectPath, work, fallbackTarget, library, worker, status, false, null);
     }
 
     static void showRedacted(Window owner, StudioProject project, Path path, RomLibrary library,
                              Executor worker, Consumer<String> status) {
-        show(owner, project, path, null, project.target(), library, worker, status, true);
+        show(owner, project, path, null, project.target(), library, worker, status, true, null);
+    }
+
+    static void showReconstruction(Window owner, StudioProject project, Path projectPath, Path work,
+                                   TargetGame fallbackTarget, RomLibrary library, Executor worker,
+                                   Consumer<String> status, Callable<ProjectExport.Source> journal) {
+        show(owner, project, projectPath, work, fallbackTarget, library, worker, status, false, journal);
     }
 
     private static void show(Window owner, StudioProject project, Path projectPath, Path work, TargetGame fallbackTarget,
-                             RomLibrary library, Executor worker, Consumer<String> status, boolean redacted) {
+                             RomLibrary library, Executor worker, Consumer<String> status, boolean redacted,
+                             Callable<ProjectExport.Source> journal) {
         boolean nativeBank = project != null && project.nativeProgram() != null;
-        Callable<ProjectExport.Source> source = () -> project == null ? ProjectExport.open(work)
-                : new ProjectExport.Source(project, work);
+        Callable<ProjectExport.Source> source = journal != null ? journal
+                : () -> project == null ? ProjectExport.open(work) : new ProjectExport.Source(project, work);
         RomGame game = project == null ? RomGame.parse(fallbackTarget.id()) : TestInGame.game(project);
         String name = project == null ? work.getFileName().toString() : project.name();
         var target = project == null ? fallbackTarget : project.target();
@@ -307,7 +314,7 @@ final class ExportDialog {
             TestInGameDialog.show(owner, name, source, projectPath, testDriver.get(), library, worker, status);
         } else {
             options.ifPresent(value -> {
-                Callable<ProjectExport.Source> exportSource = project == null && ExportPackageOptions.supports(value.format())
+                Callable<ProjectExport.Source> exportSource = journal == null && project == null && ExportPackageOptions.supports(value.format())
                         ? () -> new ProjectExport.Source(ProjectFiles.loadSource(work.resolve("arrangement.smps.json")), work)
                         : source;
                 Path verifyRom = packageSelected.get() && override.get() == null ? rom.get() : null;
@@ -422,6 +429,7 @@ final class ExportDialog {
         progress.initOwner(owner);
         var job = new Task<Boolean>() {
             @Override protected Boolean call() throws Exception {
+                updateMessage("Preparing canonical export source…");
                 var opened = source.call();
                 if (ExportPackageOptions.supports(options.format())) {
                     updateMessage("Checking package and ROM references…");
@@ -454,7 +462,7 @@ final class ExportDialog {
                     }
                     prepared.write(output, this::report);
                 } else {
-                    ProjectExport.write(opened.project(), opened.work(), output, options, this::report);
+                    ProjectExport.write(opened, output, options, this::report);
                 }
                 return true;
             }

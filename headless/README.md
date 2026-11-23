@@ -410,6 +410,11 @@ Those estimates are independent of the audio-only import.
 
 ## Choose a reconstruction target
 
+Use `bench live-edit WORK_DIR JOURNAL.json --target s1|s2|s3k` to measure
+headless live replay and verify full-song PCM against a canonical rebuild.
+See the [live-edit benchmark](../docs/architecture/benchmark.md#live-edit-latency-and-parity)
+for options.
+
 Set `--target s1|s2|s3k` on `reconstruct import`, `run`, or `transcribe`
 to choose the game before analysis. The default is `s3k`. Import includes
 the selected target in its runnable request. Subsequent stages and
