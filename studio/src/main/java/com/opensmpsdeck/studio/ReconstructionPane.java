@@ -156,8 +156,9 @@ final class ReconstructionPane implements AutoCloseable {
         editor.initializeInspectors();
         var footer = listen.bar();
         var viewBar = displayControls();
-        var viewToggle = new ToggleButton("View");
-        viewToggle.setTooltip(new Tooltip("Show zoom, spectrogram and display settings"));
+        var viewToggle = new ToggleButton("Display ▾");
+        viewToggle.setTooltip(new Tooltip(
+                "Display settings: time and pitch zoom, spectrum contrast, Sharp, ridges, spectrum source and lanes"));
         viewToggle.setId("reconstruction-view-settings");
         viewBar.visibleProperty().bind(viewToggle.selectedProperty());
         viewBar.managedProperty().bind(viewBar.visibleProperty());

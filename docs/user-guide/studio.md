@@ -415,7 +415,7 @@ returns to the current arrangement.
 
 ### Adjust the view
 
-Open **View** for time and pitch zoom, spectrum contrast, ridges, note opacity,
+Open **Display ▾** for time and pitch zoom, spectrum contrast, ridges, note opacity,
 outlines, lane visibility and the spectrum source. Choosing a mix or stem also
 sets the **Original** reference. Choosing the chip spectrum keeps the current
 reference.
