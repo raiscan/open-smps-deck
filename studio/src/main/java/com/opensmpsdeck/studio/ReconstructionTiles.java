@@ -175,6 +175,13 @@ final class ReconstructionTiles implements AutoCloseable {
     private final java.util.concurrent.ExecutorService workers = Executors.newFixedThreadPool(
             Math.clamp(Runtime.getRuntime().availableProcessors() / 2, 2, 4),
             runnable -> Thread.ofPlatform().daemon().name("reconstruction-spectrum").unstarted(runnable));
+    // Colouring takes a fraction of a millisecond per tile, so one thread keeps up and never
+    // waits behind measurements.
+    private final java.util.concurrent.ExecutorService painters = Executors.newSingleThreadExecutor(
+            runnable -> Thread.ofPlatform().daemon().name("reconstruction-colour").unstarted(runnable));
+    private final Map<ImageKey, Future<?>> colouring = new HashMap<>();
+    private record Layer(Key tile, int tint) {}
+    private final Map<Layer, ImageKey> latest = lru(4096);
     private boolean closed;
 
     ReconstructionTiles(ReconstructionInspection model, Runnable repaint, Consumer<String> error) {
@@ -216,18 +223,25 @@ final class ReconstructionTiles implements AutoCloseable {
         };
     }
 
-    /**
-     * Returns a displayable tile. A tile already measured under another contrast is recolored here,
-     * which is cheap, so contrast changes never blank the plot.
-     */
+    /** Returns the tile coloured for this key, or null while it is measured or coloured. */
     Tile get(ImageKey key) {
+        return displayed.get(key);
+    }
+
+    /**
+     * Returns the tile coloured for this key, or the same measurement under the contrast it was
+     * last coloured with. A contrast change then keeps the plot filled while workers recolour it.
+     */
+    Tile latest(ImageKey key) {
         var tile = displayed.get(key);
         if (tile != null) return tile;
-        var data = measured.get(key.tile());
-        if (data == null) return null;
-        tile = new Tile(image(data, colors(data, key)), data.ridges());
-        displayed.put(key, tile);
-        return tile;
+        var previous = latest.get(new Layer(key.tile(), key.tint()));
+        return previous == null ? null : displayed.get(previous);
+    }
+
+    private void show(ImageKey key, SpectrumTile data, int[] pixels) {
+        displayed.put(key, new Tile(image(data, pixels), data.ridges()));
+        latest.put(new Layer(key.tile(), key.tint()), key);
     }
 
     /** The level histogram of a measured tile, or null while it is not measured. */
@@ -288,41 +302,69 @@ final class ReconstructionTiles implements AutoCloseable {
         var wanted = Collections.newSetFromMap(new IdentityHashMap<Measurement, Boolean>());
         wanted.addAll(pending.values());
         for (var measurement : dropped) if (!wanted.contains(measurement)) measurement.future.cancel(false);
-        var groups = new LinkedHashMap<Slice, List<Key>>();
+        colouring.entrySet().removeIf(entry -> {
+            if (visible.contains(entry.getKey())) return false;
+            entry.getValue().cancel(false);
+            return true;
+        });
+        var groups = new LinkedHashMap<Slice, List<ImageKey>>();
         for (var imageKey : visible) {
             var key = imageKey.tile();
-            if (displayed.containsKey(imageKey) || pending.containsKey(key) || failures.contains(key)) continue;
-            if (measured.containsKey(key)) {
-                get(imageKey);
+            if (displayed.containsKey(imageKey) || colouring.containsKey(imageKey) || failures.contains(key)) continue;
+            var data = measured.get(key);
+            if (data != null) {
+                colouring.put(imageKey, painters.submit(() -> colour(imageKey, data)));
                 continue;
             }
-            var group = groups.computeIfAbsent(new Slice(key.source(), key.level(), key.index(), key.rows(),
-                    key.reassigned()), ignored -> new ArrayList<>());
-            if (!group.contains(key)) group.add(key);
+            // A measurement already under way is coloured by the next request after it lands.
+            if (pending.containsKey(key)) continue;
+            groups.computeIfAbsent(new Slice(key.source(), key.level(), key.index(), key.rows(), key.reassigned()),
+                    ignored -> new ArrayList<>()).add(imageKey);
         }
         for (var group : groups.values()) {
             var measurement = new Measurement();
-            for (var key : group) pending.put(key, measurement);
+            for (var imageKey : group) pending.put(imageKey.tile(), measurement);
             measurement.future = workers.submit(() -> prepare(group, measurement));
         }
+    }
+
+    private void colour(ImageKey key, SpectrumTile data) {
+        var pixels = colors(data, key);
+        Platform.runLater(() -> {
+            if (closed) return;
+            colouring.remove(key);
+            show(key, data, pixels);
+            repaint.run();
+        });
     }
 
     /** Tiles that differ only in octave block, which one pass over the audio measures together. */
     private record Slice(AudioSource source, int level, int index, int rows, boolean reassigned) {}
 
-    private void prepare(List<Key> group, Measurement measurement) {
+    /** Measures a slice's blocks and colours them for the requested contrasts and tints. */
+    private void prepare(List<ImageKey> group, Measurement measurement) {
         try {
-            measure(group);
+            var keys = group.stream().map(ImageKey::tile).distinct().toList();
+            measure(keys);
+            var spectra = new ArrayList<SpectrumTile>(group.size());
+            var pixels = new ArrayList<int[]>(group.size());
+            for (var imageKey : group) {
+                var data = measured.get(imageKey.tile());
+                spectra.add(data);
+                pixels.add(data == null ? null : colors(data, imageKey));
+            }
             Platform.runLater(() -> {
                 if (closed) return;
-                for (var key : group) pending.remove(key, measurement);
+                for (var key : keys) pending.remove(key, measurement);
+                for (int i = 0; i < group.size(); i++)
+                    if (spectra.get(i) != null) show(group.get(i), spectra.get(i), pixels.get(i));
                 repaint.run();
             });
         } catch (Exception failure) {
             Platform.runLater(() -> {
                 if (closed) return;
                 boolean shown = false;
-                for (var key : group) {
+                for (var key : group.stream().map(ImageKey::tile).distinct().toList()) {
                     if (pending.remove(key, measurement)) {
                         failures.add(key);
                         shown = true;
@@ -356,6 +398,8 @@ final class ReconstructionTiles implements AutoCloseable {
     @Override public void close() {
         closed = true;
         workers.shutdownNow();
+        painters.shutdownNow();
+        colouring.clear();
         pending.clear();
     }
 }
