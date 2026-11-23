@@ -1216,8 +1216,10 @@ Review the saved vocal contour and suggested edits by phrase with
 `reconstruct_vocal_review`. The response includes source-time syllables,
 per-note RMVPE and stem harmonic summaries, repeat votes, and kept FM1
 gates in both clocks. The `pitchDecisions` array records retuned,
-joined and suppressed source gates with estimated pitch support,
-unshifted pitches and reasons. `--propose` (MCP `propose: true`) saves suggestions
+joined and suppressed source gates with estimated pitch support and
+unshifted pitches. For retunes, `pitchEvidence` identifies the supporting
+stem spectrum, song or section register and pitch set, repeated phrase,
+or contour continuity. `--propose` (MCP `propose: true`) saves suggestions
 for CLI or Studio review. Vocal decisions follow stable note identities and
 the intent and material evidence, so a rejected suggestion stays out of
 pending counts across rebuilds. Use `--show-decided` (MCP

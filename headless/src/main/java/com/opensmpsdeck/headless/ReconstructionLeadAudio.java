@@ -234,6 +234,10 @@ final class ReconstructionLeadAudio {
 
         int frames() { return rms.length; }
 
+        VocalOctaveSpectrum vocalOctaveSpectrum() {
+            return new VocalOctaveSpectrum(mono, rate);
+        }
+
         double partialLevel(int pitch, int harmonic, int frame) {
             return pitch < LOW || pitch > HIGH || frame < 0 || frame >= rms.length
                     ? 0 : peaks[index(pitch, harmonic)][frame];
