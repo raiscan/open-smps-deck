@@ -1182,7 +1182,10 @@ periodicity supplies the comparison reference. The manifest and report
 record the selected method, register shift, gate and candidate metrics.
 
 The syllable mode preserves separate attacks on repeated pitches and
-snapshots its pitch contour and detected boundaries. Alternative note
+snapshots its pitch contour and detected boundaries. The pipeline tracks
+pitch continuity through ambiguous octaves and overlapping voices, joins
+same-syllable fragments, and requires articulation and pitch support for
+standalone notes shorter than 100 ms. Alternative note
 transcribers use the existing monophonic cleanup and pitch salience.
 When other tonal stems are present, vocals need at least two seconds of
 audible periodic pitch (or 15% of a short excerpt, whichever is smaller)
@@ -1198,7 +1201,9 @@ Review the saved vocal contour and suggested edits by phrase with
 `reconstruct vocal-review WORK_DIR [--phrase ID] --json` or MCP
 `reconstruct_vocal_review`. The response includes source-time syllables,
 per-note RMVPE and stem harmonic summaries, repeat votes, and kept FM1
-gates in both clocks. `--propose` (MCP `propose: true`) saves suggestions
+gates in both clocks. The `pitchDecisions` array records retuned,
+joined and suppressed source gates with estimated pitch support,
+unshifted pitches and reasons. `--propose` (MCP `propose: true`) saves suggestions
 for CLI or Studio review. Vocal decisions follow stable note identities and
 the intent and material evidence, so a rejected suggestion stays out of
 pending counts across rebuilds. Use `--show-decided` (MCP

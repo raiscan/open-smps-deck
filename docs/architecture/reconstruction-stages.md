@@ -80,8 +80,17 @@ each transcriber's output. Replay needs these audio and catalogue files and
 uses the saved detector output and transcription snapshots. A paired vocal
 transcriber snapshot retains both candidates. Replay re-evaluates each
 candidate and their union against the aligned stem, then routes the
-selected monophonic contour to the lead. The vocal patch probe ranks
-sustained FM timbres independently of the singer's timbre.
+selected monophonic contour to the lead. For a selected syllable snapshot,
+a pitch path scores each gate against RMVPE, independent period estimates
+and the stem's fundamentals and partials. Large leaps and octave changes
+cost more when local evidence is weak. Corroborated pitches in the
+surrounding section, song and rhythmically matching phrases act as soft
+priors. Strong local evidence retains the original pitch. Same-pitch
+fragments join within a syllable and short unsupported attacks are
+removed before register shift and allocation. The raw RMVPE snapshot
+remains available alongside the automatic decisions in `vocal-review`.
+The vocal patch probe ranks sustained FM timbres independently of the
+singer's timbre.
 
 In polyphonic stem recovery, a generated upper note is excluded when its
 frequency, relative phase and amplitude envelope follow a concurrent

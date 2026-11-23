@@ -47,7 +47,8 @@ public final class ReconstructionVocalReview {
 
     record ReviewData(int part, int shift, String stem, double[] pitches, Boundaries boundaries,
                       List<Span> spans, List<Note> notes, ReconstructionTimeMap time,
-                      VocalStemEvidence audio, ReconstructionBeatMap grid, List<KeptNote> kept) {}
+                      VocalStemEvidence audio, ReconstructionBeatMap grid, List<KeptNote> kept,
+                      List<VocalPitchContinuity.Decision> pitchDecisions) {}
 
     static void cli(String[] args, PrintStream out) throws IOException {
         require(args.length > 0, "vocal-review", "expected WORK_DIR [--phrase ID] [--propose] [--show-decided] [--json]");
@@ -85,7 +86,7 @@ public final class ReconstructionVocalReview {
         for (var span : context.spans) {
             if (phraseId != null && !span.id.equals(phraseId)) continue;
             candidates.add(analyze(context.part, span, context.notes, context.pitches, context.boundaries, context.time,
-                    context.audio, context.grid, context.shift, repeat));
+                    context.audio, context.grid, context.shift, repeat, context.pitchDecisions));
         }
         require(!candidates.isEmpty(), "phrase", "unknown phrase ID " + phraseId);
         var generated = candidates.stream().flatMap(phrase -> phrase.flags.stream()).map(Flag::proposal).toList();
@@ -114,6 +115,10 @@ public final class ReconstructionVocalReview {
                 .toArray()));
         result.add("keptFm1Notes", JSON.toJsonTree(context.kept.stream().filter(note -> candidates.stream()
                 .anyMatch(phrase -> note.sourceStart < phrase.sourceEnd && note.sourceEnd > phrase.sourceStart)).toList()));
+        if (!context.pitchDecisions.isEmpty())
+            result.add("pitchDecisions", JSON.toJsonTree(context.pitchDecisions.stream().filter(decision ->
+                    candidates.stream().anyMatch(phrase -> decision.sourceStart() < phrase.sourceEnd
+                            && decision.sourceEnd() > phrase.sourceStart)).toList()));
         if (showDecided) result.add("decided", JSON.toJsonTree(state.decided()));
         return result;
     }
@@ -175,7 +180,9 @@ public final class ReconstructionVocalReview {
                                 gate.projectStart(), gate.projectEnd());
                     }).sorted(Comparator.comparingDouble(KeptNote::sourceStart)).toList()
                 : List.<KeptNote>of();
-        return new ReviewData(part, shift, stem, pitches, boundaries, spans, notes, time, audio, grid, kept);
+        var decisions = JSON.fromJson(metadata.get(VocalPitchContinuity.DECISIONS), VocalPitchContinuity.Decision[].class);
+        return new ReviewData(part, shift, stem, pitches, boundaries, spans, notes, time, audio, grid, kept,
+                decisions == null ? List.of() : List.of(decisions));
     }
 
     private static Map<String, String> syllableEvidence(ExternalTranscribers.Evidence provenance) {
@@ -198,6 +205,13 @@ public final class ReconstructionVocalReview {
     static Phrase analyze(int part, Span span, List<Note> all, double[] f0, Boundaries boundaries,
                           ReconstructionTimeMap time, VocalStemEvidence audio, ReconstructionBeatMap grid,
                           int shift, Map<String, VocalPhraseRepeats.Consensus> repeats) {
+        return analyze(part, span, all, f0, boundaries, time, audio, grid, shift, repeats, List.of());
+    }
+
+    private static Phrase analyze(int part, Span span, List<Note> all, double[] f0, Boundaries boundaries,
+                                  ReconstructionTimeMap time, VocalStemEvidence audio, ReconstructionBeatMap grid,
+                                  int shift, Map<String, VocalPhraseRepeats.Consensus> repeats,
+                                  List<VocalPitchContinuity.Decision> decisions) {
         var notes = all.stream().filter(note -> note.start() >= span.start && note.start() < span.end).toList();
         var review = new ArrayList<LeadNote>();
         var flags = new ArrayList<Flag>();
@@ -280,7 +294,11 @@ public final class ReconstructionVocalReview {
             }
             if (contour.medianMidi != null && Math.abs(contour.medianMidi - note.pitch()) > PITCH_TOLERANCE) {
                 int pitch = playable(contour.medianMidi);
-                if (pitch != note.pitch() && !(Math.abs(pitch - note.pitch()) >= 10 && (confirmed || repeatAgrees))) {
+                boolean continuityHeld = decisions.stream().anyMatch(decision -> decision.selectedPitch() != null
+                        && decision.selectedPitch() + shift == note.pitch() && decision.observedPitch() + shift == pitch
+                        && decision.sourceStart() < note.end() && decision.sourceEnd() > note.start());
+                if (pitch != note.pitch() && !continuityHeld
+                        && !(Math.abs(pitch - note.pitch()) >= 10 && (confirmed || repeatAgrees))) {
                     var curve = bend(f0, note);
                     flags.add(curve.isEmpty()
                             ? flag(part, note.start(), "contourDisagreement", "Use the rounded RMVPE median for this gate",

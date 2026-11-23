@@ -223,6 +223,8 @@ that reaches roles but drops in allocation has a separate fate and reason.
    `reconstruct_vocal_review` with `workDir`. Scope to a phrase with
    `--phrase ID` (MCP `phrase`). The review includes decoded syllables,
    kept FM1 gates, and per-note contour, harmonic and repeat evidence.
+   Read `pitchDecisions` for automatic retunes, merges and suppressed
+   attacks in the stem register before the configured shift.
    Subharmonic support can expose an RMVPE octave error. Loud, stable
    notes or notes consistent across repeats can be valid register leaps.
 2. Use `reconstruct vocal-render "$work" --phrase ID OUT.wav` or MCP
