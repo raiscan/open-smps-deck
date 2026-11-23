@@ -69,6 +69,8 @@ final class StudioAnalysisCapture {
             run.shot("analysis-role-filters", "Roles", "Show, highlight and select by musical role", scene);
             ui(() -> press(scene, "reconstruction-detail-view"));
             run.shot("analysis-detail", "Notes", "Spectrogram, note tools and empty inspector", scene);
+            if (model.separatedStems() != null && model.separatedStems().names().containsAll(List.of("vocals", "bass")))
+                run.attempt("Analysis source stems", () -> captureStems(run, scene, canvas, model.separatedStems().names()));
             ui(() -> press(scene, "reconstruction-view-settings"));
             run.shot("analysis-view", "View settings", "Zoom, evidence and display controls", scene);
             ui(() -> press(scene, "reconstruction-view-settings"));
@@ -125,6 +127,27 @@ final class StudioAnalysisCapture {
         } finally {
             ui(pane::close);
         }
+    }
+
+    private static void captureStems(StudioCaptureRun run, Scene scene, ReconstructionCanvas canvas,
+                                     List<String> names) throws Exception {
+        ui(() -> press(scene, "reconstruction-stems"));
+        run.shot("analysis-stems-all", "Source stems", "Original full mix and all source channels", scene);
+        ui(() -> {
+            for (var name : names) if (!List.of("vocals", "bass").contains(name))
+                press(scene, "reconstruction-stem-" + name);
+        });
+        await("vocals and bass spectrogram and audio",
+                () -> canvas.spectrumReady() && !label(scene, "reconstruction-status").startsWith("Preparing stems"));
+        run.shot("analysis-stems-vocals-bass", "Source stems", "Vocals and bass over the dimmed mix", scene);
+        ui(() -> press(scene, "reconstruction-stem-bass"));
+        await("vocal spectrogram and audio",
+                () -> canvas.spectrumReady() && !label(scene, "reconstruction-status").startsWith("Preparing stems"));
+        run.shot("analysis-stems-vocals-solo", "Source stems", "Vocal solo in the standard colour map", scene);
+        ui(() -> {
+            press(scene, "reconstruction-stem-all");
+            press(scene, "reconstruction-stems");
+        });
     }
 
     private static void captureNoteStates(StudioCaptureRun run, Scene scene) throws Exception {

@@ -43,6 +43,38 @@ final class StudioPlayback implements AutoCloseable {
 
     private static final Samples SILENCE = (seconds, channel) -> 0;
 
+    /** A short fade between two sampled sources at the same playback time. */
+    private static final class SampleFade {
+        private static final int FRAMES = RATE / 200;
+        private Samples current;
+        private Samples previous;
+        private int remaining;
+
+        void select(Samples next) {
+            if (next == current) return;
+            if (next == null || current == null) {
+                current = next;
+                previous = null;
+                remaining = 0;
+            } else if (remaining == 0) {
+                previous = current;
+                current = next;
+                remaining = FRAMES;
+            }
+        }
+
+        double sample(double time, int channel) {
+            double next = current.sample(time, channel);
+            if (remaining == 0) return next;
+            double fraction = (FRAMES - remaining + 1) / (double) FRAMES;
+            return previous.sample(time, channel) * (1 - fraction) + next * fraction;
+        }
+
+        void advance() {
+            if (remaining > 0 && --remaining == 0) previous = null;
+        }
+    }
+
     private record Segment(long deviceStart, long projectStart, int length) {}
 
     private final ExecutorService worker = worker("studio-audio");
@@ -412,6 +444,7 @@ final class StudioPlayback implements AutoCloseable {
     private void stream(SourceDataLine output, RenderBuffer render, ReviewTransport state, Supplier<Samples> monitor,
                         long initial, long end, DoubleConsumer position, long version, LiveStream live,
                         boolean resumeEdit) throws Exception {
+        var fade = new SampleFade();
         byte[] bytes = new byte[BLOCK * 4];
         var queued = new ArrayDeque<Segment>();
         long written = 0, cursor = initial < end ? initial : 0;
@@ -469,14 +502,16 @@ final class StudioPlayback implements AutoCloseable {
                 int index = (int) (cursor % BLOCK);
                 int count = (int) Math.min(BLOCK - index, boundary - cursor);
                 var samples = monitor.get();
+                fade.select(samples);
                 if (samples != null) {
                     for (int i = 0; i < count; i++) {
                         double time = (cursor + i) / (double) RATE;
                         for (int channel = 0; channel < 2; channel++) {
-                            double sample = samples.sample(time, channel);
+                            double sample = fade.sample(time, channel);
                             int pcm = sample == 0 ? 0 : (int) Math.round(Math.clamp(sample * 32768.0, -32768, 32767));
                             put(bytes, i * 2 + channel, pcm);
                         }
+                        fade.advance();
                     }
                 } else {
                     int presentation = presentation(cursor);

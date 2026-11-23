@@ -65,6 +65,7 @@ public final class ReconstructionInspection {
     private final StudioProject project;
     private final TargetGame target;
     private final List<AudioSource> sources;
+    private final ReconstructionStems separatedStems;
     private final List<Overlay> overlays;
     private final List<LayerOverlay> layers;
     private final ReconstructionSections.Result sections;
@@ -82,6 +83,7 @@ public final class ReconstructionInspection {
         this.stockReasons = ReconstructionVoicing.stockReasons(work);
         this.layers = trace.values().stream().flatMap(row -> layerOverlays(row, clock).stream()).toList();
         this.sources = sources(work, score);
+        this.separatedStems = discoverStems(sources);
         var span = new ReconstructionView.Span(0, duration(), TimeBase.source, clock);
         var patches = new HashMap<String, NavigableMap<Double, String>>();
         for (var change : EvidenceNotes.patchChanges(project, span, ReconstructionView.LANES))
@@ -145,6 +147,19 @@ public final class ReconstructionInspection {
     public TargetGame target() { return target; }
     public StudioProject project() { return project; }
     public List<AudioSource> sources() { return sources; }
+    public ReconstructionStems separatedStems() { return separatedStems; }
+
+    private static ReconstructionStems discoverStems(List<AudioSource> sources) {
+        var mix = sources.stream().filter(source -> source.kind() == AudioKind.MIX && !source.projectClock())
+                .findFirst().orElse(null);
+        if (mix == null) return null;
+        try {
+            return ReconstructionStems.open(mix.path());
+        } catch (IOException | IllegalArgumentException invalidSeparation) {
+            // Existing work can still be inspected when a separated input was moved or changed.
+            return null;
+        }
+    }
     public List<Overlay> overlays() { return overlays; }
     public ReconstructionSections.Result sections() { return sections; }
     public List<Part> parts() { return parts; }
