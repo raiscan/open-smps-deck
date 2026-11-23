@@ -1459,13 +1459,15 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             var imageKey = new ReconstructionTiles.ImageKey(key, scale, tint);
             needed.add(imageKey);
             var tile = tiles.get(imageKey);
-            if (tile == null) {
+            // Until the tile is coloured for this contrast, show its last colouring.
+            var shown = tile != null ? tile : tiles.latest(imageKey);
+            if (shown == null) {
                 drawFallbackTile(g, key, tint, scale);
                 continue;
             }
-            drawTile(g, key, tile.image(), key.start(), key.end());
-            drawn++;
-            if (ridges && !background) visibleRidges.addAll(tile.ridges());
+            drawTile(g, key, shown.image(), key.start(), key.end());
+            if (tile != null) drawn++;
+            if (ridges && !background) visibleRidges.addAll(shown.ridges());
         }
         g.restore();
         if (ridges) {
@@ -1528,7 +1530,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         for (int rows : densities) {
             var dense = ReconstructionTiles.key(key.source(), key.level(), key.index(), key.block(), rows, key.reassigned());
             if (rows != key.rows()) {
-                var same = tiles.get(new ReconstructionTiles.ImageKey(dense, scale, tint));
+                var same = tiles.latest(new ReconstructionTiles.ImageKey(dense, scale, tint));
                 if (same != null) {
                     drawTile(g, dense, same.image(), key.start(), key.end());
                     return;
@@ -1543,7 +1545,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         for (int level = key.level() + 1; level <= ReconstructionTiles.MAX_LEVEL; level++) {
             var parent = ReconstructionTiles.key(key.source(), level, key.index() >> (level - key.level()), key.block(),
                     dense.rows(), key.reassigned());
-            var cached = tiles.get(new ReconstructionTiles.ImageKey(parent, scale, tint));
+            var cached = tiles.latest(new ReconstructionTiles.ImageKey(parent, scale, tint));
             if (cached == null) continue;
             drawTile(g, parent, cached.image(), key.start(), key.end());
             return true;
@@ -1553,7 +1555,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         for (int child = 0; child < 2; child++) {
             var finer = ReconstructionTiles.key(key.source(), key.level() - 1, key.index() * 2 + child, key.block(),
                     dense.rows(), key.reassigned());
-            var cached = tiles.get(new ReconstructionTiles.ImageKey(finer, scale, tint));
+            var cached = tiles.latest(new ReconstructionTiles.ImageKey(finer, scale, tint));
             if (cached != null) {
                 drawTile(g, finer, cached.image(), finer.start(), finer.end());
                 any = true;
