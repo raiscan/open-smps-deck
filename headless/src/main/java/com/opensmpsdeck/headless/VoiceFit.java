@@ -119,6 +119,26 @@ final class VoiceFit {
                 && improves(other.adjusted(trial.check()), selected.adjusted(now.check()), relativeMargin);
     }
 
+    /**
+     * Rechecks replaced lanes against the selections they displaced, which the map holds
+     * by lane. A lane that no longer beats its old selection by the margin gets that
+     * selection back, gain included, and leaves the map. Sweeps repeat until one restores
+     * nothing, so a survivor is always checked beside the final state of every other lane.
+     */
+    void settle(java.util.Map<Integer, Selection> replaced, double relativeMargin) {
+        if (replaced.size() < 2) return;
+        boolean restored = true;
+        while (restored && !replaced.isEmpty()) {
+            restored = false;
+            for (var entry : List.copyOf(replaced.entrySet())) {
+                if (beats(entry.getKey(), entry.getValue().candidate(), relativeMargin)) continue;
+                replace(entry.getKey(), entry.getValue());
+                replaced.remove(entry.getKey());
+                restored = true;
+            }
+        }
+    }
+
     private static boolean improves(double from, double to, double relativeMargin) {
         return from - to > Math.max(1e-10, from * relativeMargin);
     }

@@ -301,17 +301,8 @@ final class ReconstructionVoiceStage {
                 models.set(i, model.withPatch(winner));
                 if (fit.challenge(i, trial, VoiceFit.INCUMBENT_MARGIN)) replaced.put(i, selection);
             }
-            // With several replacements, each must still earn its place beside the others.
-            boolean restored = true;
-            while (restored && replaced.size() > 1) {
-                restored = false;
-                for (var entry : List.copyOf(replaced.entrySet())) {
-                    if (fit.beats(entry.getKey(), entry.getValue().candidate(), VoiceFit.INCUMBENT_MARGIN)) continue;
-                    fit.replace(entry.getKey(), fit.trial(entry.getKey(), entry.getValue().candidate()).selection());
-                    replaced.remove(entry.getKey());
-                    restored = true;
-                }
-            }
+            // Each replacement must still earn its place beside the selections that remain.
+            fit.settle(replaced, VoiceFit.INCUMBENT_MARGIN);
         }
         var patchIds = new ArrayList<String>();
         var patchScores = new ArrayList<List<ScoredPatch>>();
@@ -490,9 +481,8 @@ final class ReconstructionVoiceStage {
     }
 
     private static boolean sameFile(Path first, Path second) throws IOException {
-        if (first.equals(second)) return true;
-        return java.nio.file.Files.exists(first) && java.nio.file.Files.exists(second)
-                && java.nio.file.Files.isSameFile(first, second);
+        // A missing or unreadable path throws, and the caller counts that as shared.
+        return first.equals(second) || java.nio.file.Files.isSameFile(first, second);
     }
 
     private static VoiceFit.Candidate patchTrial(VoiceWindows windows, List<VoiceWindows.Reference> references,

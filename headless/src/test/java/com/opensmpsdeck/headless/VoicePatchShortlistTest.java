@@ -130,6 +130,11 @@ class VoicePatchShortlistTest {
         assertFalse(ReconstructionVoiceStage.challengeable("part-1", null, 1, Map.of(1, lead, 2, alias), mix));
         assertFalse(ReconstructionVoiceStage.challengeable("part-2", null, 2, Map.of(1, lead, 2, directory.resolve("./mix.wav")), mix));
         assertFalse(ReconstructionVoiceStage.challengeable("part-3", null, 3, stems, mix));
+        // A path that cannot be resolved counts as shared, whichever side it is on.
+        var missing = directory.resolve("missing.wav");
+        assertFalse(ReconstructionVoiceStage.challengeable("part-1", null, 1, Map.of(1, lead, 2, missing), mix));
+        assertFalse(ReconstructionVoiceStage.challengeable("part-1", null, 1, stems, missing));
+        assertFalse(ReconstructionVoiceStage.challengeable("part-1", null, 1, Map.of(1, missing, 2, bass), mix));
     }
 
     private static void write(Path file, short[] audio, int frames) throws Exception {
