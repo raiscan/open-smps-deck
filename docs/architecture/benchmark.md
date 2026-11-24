@@ -134,6 +134,34 @@ patches' bytes are known, and `voiceAlgorithmCoverage` gives that share of
 the matched notes. Corpus runs report `voiceAlgorithm` when
 holdout mode is off.
 
+`bench run --voice-retrieval` adds a report-only measure of the per-note
+decode to each ladder case. A reconstructed note is labelled when it starts
+within 50 ms of a native FM note of the same pitch and every such note has
+one patch. All values are counts, so cases can be summed.
+
+| Metric | Meaning |
+| --- | --- |
+| `voiceRetrievalNotes` | Labelled notes with at least a tenth of their harmonics clear of the other native channels |
+| `voiceRetrievalTop1` | How many of them have the native patch as their own best candidate |
+| `voiceRetrievalDecoded` | How many have the native patch as their decoded patch |
+| `voiceRetrievalLowerExposure` | Labelled notes below that exposure, counted apart with `…LowerExposureTop1` and `…LowerExposureDecoded` |
+| `voiceRetrievalUnlabelled` | Decoded notes that pair with no native FM note, or with two patches |
+| `voiceRetrievalNative…` | The same counts for the native notes themselves, each channel scored on the stem most of its labelled notes were heard in |
+| `voiceRetrievalNativeUnplaced` | Native FM notes of channels no reconstructed note was labelled from |
+
+Read them with these limits:
+
+- The first group is the transcribed result. The `Native` group is an
+  oracle: it uses the true timings and channel grouping on the same audio.
+- A note's best candidate is the best of the decode's shortlist of 25, not
+  of the whole bank.
+- Several reconstructed notes can be labelled from one native note.
+- Exposure is computed from the native score. It describes the truth, not
+  what the decode saw.
+
+Transcription can differ between runs, so compare changes on one kept
+reconstruction with `bench voice-retrieval TRUTH.json WORK_DIR`.
+
 Build the classic quick corpora from user-supplied REV01 ROMs. Set `bench`
 to a private output directory, and `s1_rom` and `s2_rom` to the ROM paths.
 `rom set` registers the path in RomLibrary for the stock DAC kit.

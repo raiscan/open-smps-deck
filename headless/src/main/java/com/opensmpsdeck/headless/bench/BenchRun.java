@@ -30,10 +30,11 @@ import java.util.logging.Logger;
 
 final class BenchRun {
     record Options(boolean quick, boolean holdout, boolean audioRefine, int jobs, Path gold, boolean goldOnly,
-                   BenchRolePlan.Mode rolePlan, String steadyTempo, TargetGame target, boolean keepWork) {
+                   BenchRolePlan.Mode rolePlan, String steadyTempo, TargetGame target, boolean keepWork,
+                   boolean voiceRetrieval) {
         Options(boolean quick, boolean holdout, boolean audioRefine, int jobs, Path gold, boolean goldOnly,
                 BenchRolePlan.Mode rolePlan, String steadyTempo, TargetGame target) {
-            this(quick, holdout, audioRefine, jobs, gold, goldOnly, rolePlan, steadyTempo, target, false);
+            this(quick, holdout, audioRefine, jobs, gold, goldOnly, rolePlan, steadyTempo, target, false, false);
         }
 
         boolean classic() { return target != TargetGame.S3K; }
@@ -248,6 +249,7 @@ final class BenchRun {
             metrics.put("onsetCorrelation", distance.onsetCorrelation());
             release(truth, estimateWithLayers, layered.pairs(), audio)
                     .ifPresent(value -> metrics.put("releaseEnergy", value));
+            if (ladder && options.voiceRetrieval()) retrieval(metrics, output, truth);
             BenchGold.Score lead = null;
             if (ladder) {
                 lead = scoreLadderLead(metrics, "", output, truth, estimate, projectTones, c.ladder(), clock, input);
@@ -271,6 +273,31 @@ final class BenchRun {
                     .resolve(c.ladder().rung().label).resolve("work"));
             if (Files.exists(output)) BenchFiles.deleteScratch(output);
         }
+    }
+
+    /**
+     * Report only: how often the per-note decode names a note's native patch. Notes with
+     * few harmonics clear of the other native channels are counted apart.
+     */
+    private static void retrieval(Map<String, Double> metrics, Path work, List<BenchMetrics.Event> truth)
+            throws IOException {
+        var result = com.opensmpsdeck.headless.VoiceRetrieval.measure(work, truth.stream()
+                .map(note -> new com.opensmpsdeck.headless.VoiceRetrieval.Truth(note.lane(), note.start(), note.end(),
+                        note.pitch(), note.lane().startsWith("FM") ? note.hash() : null)).toList());
+        put(metrics, "voiceRetrieval", result.reconstructed());
+        put(metrics, "voiceRetrievalNative", result.nativeNotes());
+        metrics.put("voiceRetrievalUnlabelled", (double) result.unlabelled());
+        metrics.put("voiceRetrievalNativeUnplaced", (double) result.unplaced());
+    }
+
+    private static void put(Map<String, Double> metrics, String name, com.opensmpsdeck.headless.VoiceRetrieval.Counts counts) {
+        // Counts, not shares, so cases can be summed.
+        metrics.put(name + "Notes", (double) counts.notes());
+        metrics.put(name + "Top1", (double) counts.top1());
+        metrics.put(name + "Decoded", (double) counts.decoded());
+        metrics.put(name + "LowerExposure", (double) counts.lowerExposure());
+        metrics.put(name + "LowerExposureTop1", (double) counts.lowerExposureTop1());
+        metrics.put(name + "LowerExposureDecoded", (double) counts.lowerExposureDecoded());
     }
 
     // Diagnostic copy of a case's reconstruction work directory.

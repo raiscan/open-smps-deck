@@ -1827,6 +1827,31 @@ files it replaced if a replacement fails. The result lists `bankBytes`,
 applied edit with `reconstruct edit WORK_DIR remove ID`, or reject a
 proposal, to undo it.
 
+#### Stem diagnostics
+
+`reconstruct voice-regime WORK_DIR` prints two measurements for each tonal
+part that has a stem file of its own. Nothing in a reconstruction runs it or
+reads its output.
+
+- **Residual** (`unexplained`) is the median share of a note's energy the
+  best patch of the part's fitted shortlist leaves over, with one gain per
+  note, on up to 60 notes of at least 120 ms. At most 0.4 is labelled
+  `adequate`, and fewer than 20 such notes `unmeasured`.
+- **Off-harmonic share** (`offHarmonic`) is the median share of a note's
+  energy away from the harmonics of the part's own sounding notes, on notes
+  at or above G3. At most 0.14 is labelled `synthetic`, above 0.24
+  `acoustic`, and between them `uncertain`. A part whose median pitch is
+  below G3, or with fewer than 20 such notes, is `undetermined`.
+
+Both labels are tentative, and the report says so. A low residual shows
+that one shortlisted patch comes close on the sampled notes, not that the
+bank explains the source. The off-harmonic share cannot name an instrument,
+and other parts in the stem raise it too. Held out by song, the best single
+cut was right for about 7 parts in 10. Each part reports its sample counts.
+A part whose stem is missing, unreadable, the mix, or shared with another
+part is listed as `unavailable` with the reason, and the other parts are
+still measured.
+
 Run `reconstruct run --from assemble WORK_DIR` after editing voicing.
 `run --from voice` also reuses existing voicing unless refit options are given,
 or generates it if missing. Use `reconstruct voice WORK_DIR` to explicitly
