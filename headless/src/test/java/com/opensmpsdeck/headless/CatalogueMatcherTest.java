@@ -22,6 +22,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class CatalogueMatcherTest {
     @TempDir Path directory;
 
+    @Test void staleStockVoteIsAbsentWhenTheCatalogueChanges() {
+        var catalogue = new InstrumentCatalogue.Builder().build();
+        assertTrue(catalogue.stockVariant("missing-variant", TargetGame.S3K).isEmpty());
+    }
+
     @Test void ranksAReferenceAtItsRequestedPitchThroughThePackagedPublicCommand() throws Exception {
         var builder = new InstrumentCatalogue.Builder();
         var voices = DemoProject.create().voices();

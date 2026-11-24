@@ -1,6 +1,8 @@
 import argparse
 from importlib.util import find_spec
 import json
+import os
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,6 +12,13 @@ import run
 
 
 class AdapterTest(unittest.TestCase):
+    def test_empty_catalogue_environment_is_unset(self):
+        with patch.dict(os.environ, {"OPENSMPSDECK_DRUM_CATALOGUE": ""}), patch.object(
+                sys, "argv", ["adtof", "--input", "drums.wav", "--output", "events.json"]), patch.object(
+                run, "transcribe") as transcribe:
+            run.main()
+        self.assertIsNone(transcribe.call_args.args[0].catalogue)
+
     def test_relabel_preserves_times_and_requires_unambiguous_mix_hat(self):
         stem = {35: [1.0], 42: [3.0], 47: [1., 2., 3., 4.]}
         mix = {42: [1.035, 2., 3., 4.036], 47: [2.01]}
@@ -55,7 +64,7 @@ class AdapterTest(unittest.TestCase):
     def test_serializes_valid_sorted_output_and_provenance(self):
         with tempfile.TemporaryDirectory() as folder:
             output = Path(folder) / "result.json"
-            args = argparse.Namespace(input=Path("aligned.wav"), output=output, role="vocals")
+            args = argparse.Namespace(input=Path("aligned.wav"), output=output, role="vocals", kit_retrieval=False)
             with patch.object(run, "infer", return_value=({38: [.21], 35: [float("nan"), .1, -.1]}, {"version": "fixture"})):
                 run.transcribe(args)
             self.assertEqual([[.1, 35, 96], [.21, 38, 96]], json.loads(output.read_text()))

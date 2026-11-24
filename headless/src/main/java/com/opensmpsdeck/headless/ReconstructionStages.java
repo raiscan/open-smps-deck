@@ -900,7 +900,7 @@ public final class ReconstructionStages {
                     : separateDrums(reference, extra.separatorConfig, progress, err, capture, chain);
             audio = ReconstructionAudioOnly.prepare(extra.audioStems, extra.stemRoles, config.fallback(transcriber, true),
                     AudioDrumDetector.select(config, config.drumName(drumOverride == null ? extra.drumDetector : drumOverride),
-                            device, reference), duration / 1e6, extra.leadPart != null, mappedDrums ? null : drums,
+                            device, reference, index), duration / 1e6, extra.leadPart != null, mappedDrums ? null : drums,
                     mappedDrums ? null : reference);
             if (drums != null) capture.recordDrums(audio.drums().keySet(), drums);
             audio.drums().forEach((id, file) -> stems.put(id, file.toString()));

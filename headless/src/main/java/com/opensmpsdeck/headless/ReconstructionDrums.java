@@ -48,6 +48,7 @@ final class ReconstructionDrums {
     private static final int SLICE_RATE = 2;
     private static final int HITS_PER_CLASS = 5;
     private static final double REUSE_PENALTY = .12;
+    private static final double STOCK_VOTE_MARGIN = .02;
     private static final double KIT_BONUS = .045;
     private static final int[] LEGACY_TUNING = {0, -2, 2, -4, 4};
     private static final int[] STEM_TUNING = {0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5, -6, 6};
@@ -69,12 +70,14 @@ final class ReconstructionDrums {
     record Kit(String driver, String revision, @Nullable Integer songId, @Nullable String song) {}
     record Hit(double onset, double start, double length, int overlaps, @Nullable Boolean tailCensored) {}
     record Exclusion(String assetId, String name, int rate, DacAcoustics.SampleClass sampleClass, String reason) {}
+    record VoteEvidence(String variant, double distance, double score, String regularVariant, int regularRate,
+                        double regularDistance, double bestScore, double requiredMargin, double margin, boolean withinMargin) {}
     record Evidence(String reference, ReconstructionTimeMap.TimeBase timeBase, List<Hit> hits, @Nullable Features target,
                     List<Candidate> alternatives, @Nullable Candidate catalogue, Source selected, String reason,
                     @Nullable Kit preferredKit, @Nullable Boolean inPreferredKit,
                     @Nullable DrumClass drumClass, @Nullable Integer acousticProfileVersion,
                     @Nullable List<Exclusion> exclusions,
-                    @Nullable String fallbackLane, @Nullable NoiseFit noise) {}
+                    @Nullable String fallbackLane, @Nullable NoiseFit noise, @Nullable VoteEvidence stockVote) {}
     /** The native PSG3 cymbal voicing scored with the DAC stem distance. */
     record NoiseFit(String voicing, double distance, Features features) {
         /** The short closed-hat envelope, rather than the longer open envelope. */
@@ -89,7 +92,7 @@ final class ReconstructionDrums {
                          AudioFingerprint fingerprint, Map<Integer, AudioFingerprint> filtered,
                          DacAcoustics.Profile acoustics, DacAcoustics.AssetProfile asset) {}
     private record Fit(List<Clip> clips, List<Candidate> candidates, DacSample slice, boolean stem,
-                       Candidate mixFallback, List<Exclusion> exclusions, boolean eligible, @Nullable NoiseFit noise) {}
+                       Candidate mixFallback, Candidate retrieved, List<Exclusion> exclusions, boolean eligible, @Nullable NoiseFit noise) {}
     private record AssetRate(String id, int rate) {}
 
     private ReconstructionDrums() {}
@@ -174,8 +177,28 @@ final class ReconstructionDrums {
             stemProbes = nativeProbes;
             labels = nativeLabels;
         }
+        var kitVotes = new HashMap<Integer, InstrumentCatalogue.Match>();
+        var noiseVotes = new HashSet<Integer>();
+        var audioOnly = score.inputs().audioOnly();
+        if (audioOnly != null && audioOnly.drumDetector().metadata() != null && profile.game() == TargetGame.S3K
+                && (source == null || source == Source.catalogue)) {
+            var metadata = audioOnly.drumDetector().metadata();
+            if ("2".equals(metadata.get("kitRetrievalVersion"))) {
+                for (var key : classes.keySet()) {
+                    String id = metadata.get("kitVariant." + key.drumPitch());
+                    if (id == null) continue;
+                    if ("PSG-noise".equals(id)) {
+                        noiseVotes.add(key.drumPitch());
+                        continue;
+                    }
+                    catalogue.stockVariant(id, profile.game())
+                            .filter(match -> match.asset().kind() == InstrumentCatalogue.Kind.DAC_SAMPLE)
+                            .ifPresent(match -> kitVotes.put(key.drumPitch(), match));
+                }
+            }
+        }
         if (!timeline.warped()) {
-            analyze(classes, clockNotes, drumParts, mix, stems, mixProbes, stemProbes, families, labels, matched, profile, options.stockDrums(), !options.fmOnly(), mixHatFits);
+            analyze(classes, clockNotes, drumParts, mix, stems, mixProbes, stemProbes, families, labels, matched, profile, options.stockDrums(), !options.fmOnly(), mixHatFits, kitVotes);
         } else {
             Path scratch = Files.createTempDirectory("drum-reference-");
             var files = new ArrayList<Path>();
@@ -195,7 +218,7 @@ final class ReconstructionDrums {
                     }
                     warpedStems.put(part, warped);
                 }
-                analyze(classes, clockNotes, drumParts, warpedMix, warpedStems, mixProbes, stemProbes, families, labels, matched, profile, options.stockDrums(), !options.fmOnly(), mixHatFits);
+                analyze(classes, clockNotes, drumParts, warpedMix, warpedStems, mixProbes, stemProbes, families, labels, matched, profile, options.stockDrums(), !options.fmOnly(), mixHatFits, kitVotes);
             } finally {
                 for (Path file : files) Files.deleteIfExists(file);
                 Files.deleteIfExists(scratch);
@@ -204,15 +227,15 @@ final class ReconstructionDrums {
         if (stock.isEmpty()) preserveUnisolatedMixChoices(score, catalogue, mix, stems, mixProbes, matched);
         var mode = options.stockDrums() ? Source.stock : source == null ? Source.catalogue : source;
         return selectKit(catalogue, stock, matched, hasStem && stock.isEmpty() ? kits(catalogue) : Map.of(),
-                timeline.timeBase(), mode, !options.fmOnly(), profile);
+                timeline.timeBase(), mode, !options.fmOnly(), profile, noiseVotes);
     }
 
     private static Set<Long> recoveredHatStarts(ReconstructionStages.Score score, ReconstructionTimeMap timeline) {
         var audio = score.inputs().audioOnly();
         if (audio == null || audio.drumDetector().metadata() == null) return Set.of();
+        var times = new HashSet<Long>();
         String json = audio.drumDetector().metadata().get("tomToHatOnsets");
         if (json == null) return Set.of();
-        var times = new HashSet<Long>();
         for (var element : com.google.gson.JsonParser.parseString(json).getAsJsonArray()) {
             double onset = Math.round(element.getAsDouble() * 1e6) / 1e6;
             times.add(Math.round(timeline.project(onset) * 1e6));
@@ -224,7 +247,8 @@ final class ReconstructionDrums {
             List<MidiScore.Note> notes, List<Integer> drumParts, Path mix, Map<Integer, Path> stems,
             List<Rated> mixProbes, List<Rated> stemProbes, Map<String, DacFamily> families,
             Map<String, DrumClass> labels, Map<ReconstructionVoices.Key, Fit> matched, TargetProfile profile, boolean stock,
-            boolean allowNoise, Set<ReconstructionVoices.Key> mixHatFits) throws IOException {
+            boolean allowNoise, Set<ReconstructionVoices.Key> mixHatFits,
+            Map<Integer, InstrumentCatalogue.Match> kitVotes) throws IOException {
         for (var entry : classes.entrySet()) {
             var key = entry.getKey();
             Path stem = mixHatFits.contains(key) ? null : stems.get(key.partId());
@@ -244,8 +268,20 @@ final class ReconstructionDrums {
             DacSample sample = stem == null || hits.isEmpty() || stock ? null : slice(hits.getFirst().samples(), key, profile);
             NoiseFit noise = allowNoise && stem != null && !hits.isEmpty() && ReconstructionCymbals.eligible(pitch)
                     ? noiseCandidate(hits, pitch, profile) : null;
-            matched.put(key, new Fit(hits, ranked, sample, stem != null, null, List.copyOf(exclusions.values()),
-                    !allowed.isEmpty(), noise));
+            var vote = kitVotes.get(pitch);
+            Candidate retrieved = null;
+            if (vote != null && !hits.isEmpty()) {
+                for (var probe : allowed) {
+                    if (probe.assetId().equals(vote.asset().id()) && probe.rate() == vote.variant().recipe().rate()) {
+                        retrieved = new Candidate(probe.assetId(), vote.variant().id(), vote.variant().name(), probe.rate(),
+                                distance(hits, probe, pitch, stem != null), probe.features(),
+                                stem != null ? classPenalty(labels.get(probe.assetId()), pitch)
+                                        : familyPenalty(families.get(probe.assetId()), pitch), probe.acoustics());
+                        break;
+                    }
+                }
+            }
+            matched.put(key, new Fit(hits, ranked, sample, stem != null, null, retrieved, List.copyOf(exclusions.values()), !allowed.isEmpty(), noise));
         }
     }
 
@@ -273,7 +309,7 @@ final class ReconstructionDrums {
             var fallback = new Candidate(previous.assetId(), previous.variantId(), previous.name(),
                     previous.sampleRate(), distance(fit.clips(), nativeProbe, key.drumPitch(), false),
                     nativeProbe.features(), null, nativeProbe.acoustics());
-            fitted.put(key, new Fit(fit.clips(), fit.candidates(), fit.slice(), fit.stem(), fallback, fit.exclusions(),
+            fitted.put(key, new Fit(fit.clips(), fit.candidates(), fit.slice(), fit.stem(), fallback, fit.retrieved(), fit.exclusions(),
                     fit.eligible(), fit.noise()));
         }
     }
@@ -735,7 +771,7 @@ final class ReconstructionDrums {
 
     private static Map<ReconstructionVoices.Key, Selection> selectKit(InstrumentCatalogue catalogue, Map<String, DacSample> stock,
             Map<ReconstructionVoices.Key, Fit> fitted, Map<Kit, Set<String>> kits,
-            ReconstructionTimeMap.TimeBase clock, Source mode, boolean allowNoise, TargetProfile profile) {
+            ReconstructionTimeMap.TimeBase clock, Source mode, boolean allowNoise, TargetProfile profile, Set<Integer> noiseVotes) {
         Kit preferred = preferredKit(fitted, kits);
         var kitAssets = preferred == null ? Set.<String>of() : kits.get(preferred);
         var usage = new HashMap<String, Integer>();
@@ -751,10 +787,18 @@ final class ReconstructionDrums {
             Fit fit = entry.getValue();
             var chosen = fit.mixFallback() != null ? fit.mixFallback() : fit.candidates().stream().filter(candidate -> sizes.containsKey(key(candidate))
                             || sizes.size() < DacSample.MAX_SAMPLES)
-                    .min(Comparator.comparingDouble(c -> c.score()
-                            - (fit.stem() && kitAssets.contains(c.assetId()) ? KIT_BONUS : 0)
-                            + REUSE_PENALTY * usage.getOrDefault(c.assetId(), 0)))
+                    .min(Comparator.comparingDouble(c -> kitScore(c, fit.stem(), kitAssets, usage)))
                     .orElse(null);
+            VoteEvidence voteEvidence = null;
+            var vote = fit.retrieved();
+            if (vote != null && chosen != null && !fit.candidates().isEmpty()) {
+                double best = Math.min(chosen.score(), fit.candidates().getFirst().score());
+                double required = requiredVoteMargin(vote, chosen, best, fit.stem(), kitAssets, usage);
+                boolean close = required <= STOCK_VOTE_MARGIN && fit.mixFallback() == null;
+                voteEvidence = new VoteEvidence(vote.variantId(), vote.distance(), vote.score(), chosen.variantId(),
+                        chosen.rate(), chosen.distance(), best, required, STOCK_VOTE_MARGIN, close);
+                if (close) chosen = vote;
+            }
             var sliced = fit.slice();
             var noise = allowNoise && mode != Source.sliced && fit.mixFallback() == null ? fit.noise() : null;
             boolean useSlice = sliced != null && (mode == Source.sliced || mode == Source.auto
@@ -772,7 +816,15 @@ final class ReconstructionDrums {
                 }
             }
             // The native PSG3 voicing competes on the same stem distance as the DAC candidates.
-            boolean noiseRoute = !useSlice && noise != null && (chosen == null || noise.distance() < chosen.score());
+            boolean noiseVote = noise != null && chosen != null && noiseVotes.contains(entry.getKey().drumPitch());
+            if (noiseVote) {
+                double best = Math.min(chosen.score(), fit.candidates().getFirst().score());
+                double required = Math.max(noise.distance() - chosen.distance(), noise.distance() - best);
+                voteEvidence = new VoteEvidence("PSG-noise", noise.distance(), noise.distance(), chosen.variantId(),
+                        chosen.rate(), chosen.distance(), best, required, STOCK_VOTE_MARGIN, required <= STOCK_VOTE_MARGIN);
+            }
+            boolean noiseRoute = !useSlice && noise != null && (chosen == null || noise.distance() < chosen.score()
+                    || noiseVote && voteEvidence.withinMargin());
             var catalogueChoice = chosen;
             if (noiseRoute) chosen = null;
             AssetRate key = useSlice ? new AssetRate(sliced.id(), sliced.rate()) : chosen == null ? null : key(chosen);
@@ -792,23 +844,38 @@ final class ReconstructionDrums {
             if (!useSlice && chosen != null) usage.merge(chosen.assetId(), 1, Integer::sum);
             boolean noEligibleDac = !useSlice && !noiseRoute && chosen == null && !fit.eligible();
             String fallbackLane = noiseRoute || noEligibleDac && allowNoise ? "PSG3" : null;
-            String reason = noiseRoute ? catalogueChoice == null ? "PSG3 noise; no eligible DAC sample" : "PSG3 noise closer than DAC"
+            String reason = noiseRoute && noiseVotes.contains(entry.getKey().drumPitch()) ? "song kit PSG noise prototype"
+                    : noiseRoute ? catalogueChoice == null ? "PSG3 noise; no eligible DAC sample" : "PSG3 noise closer than DAC"
                     : noEligibleDac ? "no acoustically eligible DAC sample"
                     : useSlice ? mode == Source.auto ? "catalogue distance above threshold" : "requested"
                     : !fit.stem() && mode != Source.catalogue ? "no drum stem supplied"
                     : chosen == null ? "no eligible fit"
+                    : chosen == fit.retrieved() ? "song kit prototype"
                     : chosen == fit.mixFallback() ? "legacy vote: fewer than two isolated hits in the mix" : "catalogue fit";
             if (mode == Source.stock && chosen != null) reason = "stock kit fit";
             var evidence = new Evidence(fit.stem() ? "stem" : "mix", clock, fit.clips().stream().map(Clip::hit).toList(),
                     summarize(fit.clips()), fit.candidates().stream().limit(5).toList(), noiseRoute ? catalogueChoice : chosen,
                     useSlice ? Source.sliced : mode == Source.stock ? Source.stock : Source.catalogue, reason, fit.stem() ? preferred : null,
                     !fit.stem() || preferred == null || chosen == null ? null : kitAssets.contains(chosen.assetId()),
-                    drumClass(entry.getKey().drumPitch()), DacAcoustics.VERSION, exclusions, fallbackLane, fit.noise());
+                    drumClass(entry.getKey().drumPitch()), DacAcoustics.VERSION, exclusions, fallbackLane, fit.noise(), voteEvidence);
             var selectedSample = useSlice ? sliced : chosen == null ? null : stock.get(chosen.assetId());
             result.put(entry.getKey(), new Selection(chosen == null || mode == Source.stock ? null : chosen.variantId(),
                     useSlice ? sliced.rate() : chosen == null ? 0 : chosen.rate(), selectedSample, evidence));
         }
         return result;
+    }
+
+    static double requiredVoteMargin(Candidate vote, Candidate regular, double bestScore, boolean stem,
+                                     Set<String> kitAssets, Map<String, Integer> usage) {
+        double acousticGap = vote.distance() - regular.distance();
+        double classGap = vote.score() - bestScore;
+        double kitGap = kitScore(vote, stem, kitAssets, usage) - kitScore(regular, stem, kitAssets, usage);
+        return Math.max(acousticGap, Math.max(classGap, kitGap));
+    }
+
+    private static double kitScore(Candidate candidate, boolean stem, Set<String> kitAssets, Map<String, Integer> usage) {
+        return candidate.score() - (stem && kitAssets.contains(candidate.assetId()) ? KIT_BONUS : 0)
+                + REUSE_PENALTY * usage.getOrDefault(candidate.assetId(), 0);
     }
 
     private static Features summarize(List<Clip> clips) {

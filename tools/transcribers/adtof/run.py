@@ -135,6 +135,13 @@ def transcribe(args):
     peaks, model = infer(args)
     rows = sorted([float(time), int(pitch), 96] for pitch, times in peaks.items() for time in times
                   if math.isfinite(time) and time >= 0)
+    if args.kit_retrieval:
+        from kit import retrieve
+        if not args.catalogue:
+            raise ValueError("kit retrieval requires the reconstruction catalogue")
+        rows, kit = retrieve(args.input, rows, json.loads(args.catalogue.read_text()),
+                             model["tomToHatOnsets"], additions=args.kit_additions)
+        model.update(kitRetrievalVersion=2, **kit)
     args.output.write_text(json.dumps(rows, allow_nan=False) + "\n", encoding="utf-8")
     metadata = {"tool": "ADTOF", "model": "Frame RNN", "velocity": 96, **model}
     Path(str(args.output) + ".meta.json").write_text(json.dumps(metadata) + "\n", encoding="utf-8")
@@ -149,7 +156,13 @@ def main():
     parser.add_argument("--role", choices=("drums",), default="drums")
     parser.add_argument("--device", default="auto", help="auto, cpu, or a Torch device such as cuda:0")
     parser.add_argument("--weights", type=Path)
-    transcribe(parser.parse_args())
+    parser.add_argument("--kit-retrieval", action="store_true", help="learn repeated drum attacks and retrieve stock variants")
+    parser.add_argument("--kit-additions", action="store_true", help="also add repeated stem attacks (requires --kit-retrieval)")
+    parser.add_argument("--catalogue", type=Path, default=os.environ.get("OPENSMPSDECK_DRUM_CATALOGUE") or None)
+    args = parser.parse_args()
+    if args.kit_additions and not args.kit_retrieval:
+        parser.error("--kit-additions requires --kit-retrieval")
+    transcribe(args)
 
 
 if __name__ == "__main__":

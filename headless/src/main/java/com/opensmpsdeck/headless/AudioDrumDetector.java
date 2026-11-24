@@ -19,6 +19,11 @@ interface AudioDrumDetector {
     record Detection(String version, Map<String, String> metadata, List<Hit> hits) {}
 
     static AudioDrumDetector select(ExternalTranscribers.Config config, String name, String device, Path mix) {
+        return select(config, name, device, mix, null);
+    }
+
+    static AudioDrumDetector select(ExternalTranscribers.Config config, String name, String device, Path mix,
+                                    Path catalogue) {
         if (name.equals("spectral")) return new SpectralDrumDetector();
         var command = config.drums().get(name);
         require(command != null, "Drum detector", "unknown detector " + name + " in " + config.file());
@@ -26,7 +31,9 @@ interface AudioDrumDetector {
             @Override public String id() { return name; }
 
             @Override public Detection detect(Path stem, double seconds) throws IOException {
-                var environment = Map.of("OPENSMPSDECK_DRUM_REFERENCE", mix.toAbsolutePath().toString());
+                var environment = new java.util.HashMap<String, String>();
+                environment.put("OPENSMPSDECK_DRUM_REFERENCE", mix.toAbsolutePath().toString());
+                if (catalogue != null) environment.put("OPENSMPSDECK_DRUM_CATALOGUE", catalogue.toString());
                 return ExternalTranscribers.invoke(command, name, stem, "drums", device, environment, output -> {
                     var tree = ReconstructionArtifacts.readTree(output);
                     require(tree != null && tree.isJsonArray(), name, "expected [[seconds, gmPitch, velocity], ...]");
