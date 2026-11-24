@@ -1764,13 +1764,27 @@ is applied without review only if it passes every guard:
 | Dwell | At least `--min-run` seconds sounding (default 4) over at least 8 key-ons, counting only notes on FM lanes. |
 | Home dwell | The part's own patch sounds that long on each side, unless the part starts or ends there. |
 | Separate phrases | Each half of the passage prefers the patch on its own, by 0.01 per note. |
-| No-switch null | At most 2% of 200 shuffles of the part, in one-second blocks, hold a run this strong for any candidate patch. A patch that is better everywhere fails here. |
-| Attack and sustain | The first 85 ms match better by 0.01, and held notes match no worse after that. |
+| No-switch null | At most 2% of 200 reshuffled copies of the part hold a run this strong. See below. |
+| Attack and sustain | The first 85 ms match better by 0.01, and at least three notes held past the attack match no worse after that. A passage with fewer held notes is only proposed. |
 | Bank explains stem | One patch is the best match for at least half the part's notes. Below that the stock bank does not explain the stem, as on most real instruments. |
 | No user choice | No note in the passage has an assigned source voice, an instrument edit in any state, or a lane override that sets a patch or gain. |
 | Two alternates | The part keeps at most two alternate patches, counting switches already accepted. |
 | Own stem | The part has a stem file no other part and not the mix points at. Shared stems, the sung lead and `--whole-part-voices` runs never apply. |
 | Stem attacks at playback level | The patch is closer than the part's own on the passage's exposed attacks, at the level the stem plays them, in most 2-second blocks. Checked only when every other guard passes. |
+
+The null asks what the part would look like with no change of patch in it.
+Under that reading a note's evidence depends on its place in the form and
+in the register, not on when it is played.
+
+- Evidence is exchanged only among notes of one top-level section and one
+  octave band, in blocks of about a second. Every other note stays put.
+- Each reshuffled copy is searched again in full: the strongest run of any
+  length, for any candidate patch. This pays for having searched patches,
+  positions and lengths to find the passage.
+- A stretch that is simply the part's only visit to a register or a
+  section scores the same reshuffled, so it fails. So does a patch that is
+  better across the whole part. That is a disagreement about the part's own
+  patch, which the review reports and never acts on.
 
 `--propose` saves the passages that pass the dwell, separate-phrases, null,
 bank, user-choice and two-alternates guards as `noteVoicing` proposals in the `voice-switch` group, with
@@ -1788,16 +1802,30 @@ differs from the part's own patch, `majorityWinsAttacks` says whether the
 voice stage's level-matched comparison of exposed stem attacks agrees. The
 review never changes a part's own patch.
 
-`--apply` adds the edits and rebuilds assembly as one step. The rebuild must
-keep every emitted note, every reduction and effect copy, and every other
-edit's outcome as they were, and the bank must fit. Otherwise the journal
-returns to its earlier bytes, the least supported edit is dropped, and the
-rest are tried again. A dropped edit stays as a proposal with the reason.
-A failure of any kind leaves the journal as it was found. If the journal
-changed while the review ran, nothing is applied and the passages are
-proposed instead. The result lists `bankBytes`, `fmPatchBankBytes` and
-`fmPatchSwitchBytes` before and after. Remove an applied edit with
-`reconstruct edit WORK_DIR remove ID`, or reject a proposal, to undo it.
+`--apply` never edits the work directory in place. The review captures the
+three journals and the artifacts it reads once, and decides everything from
+that capture.
+
+1. The journal with the new edits is built in a private copy.
+2. The copy is checked against the copy from before. Every note must have
+   the same fate, lane, placement, pitch and sounding gates, including the
+   edited notes. Reductions, effect copies and every other edit's outcome
+   must be unchanged, and the bank must fit.
+3. If the check fails, the copy is discarded, the least supported edit
+   across all parts is dropped, and the rest are tried again. A dropped edit
+   stays as a proposal with the reason.
+4. A copy that passes replaces the work directory's files under the edit,
+   section and voice journal locks, and only if those journals and the
+   reviewed artifacts are still the ones captured.
+
+If anything changed during the review, nothing is written, neither edits nor
+proposals, and the result carries `stale`. Run the review again. There is no
+rollback step, because nothing is written before a verified build is
+published. Publication is the same one Studio's Apply uses: it restores the
+files it replaced if a replacement fails. The result lists `bankBytes`,
+`fmPatchBankBytes` and `fmPatchSwitchBytes` before and after. Remove an
+applied edit with `reconstruct edit WORK_DIR remove ID`, or reject a
+proposal, to undo it.
 
 Run `reconstruct run --from assemble WORK_DIR` after editing voicing.
 `run --from voice` also reuses existing voicing unless refit options are given,

@@ -75,7 +75,7 @@ class VoiceSwitchApplyTest {
 
         // A clean rebuild is published, with the edit applied and recorded.
         var applied = VoiceSwitchReview.apply(work, edits, limit);
-        assertEquals(1, applied.getAsJsonArray("edits").size());
+        assertEquals(1, applied.getAsJsonArray("edits").size(), applied.toString());
         assertFalse(applied.has("dropped"));
         assertTrue(ReconstructionEdits.read(work).intents().stream().anyMatch(intent -> intent.id().equals("voice-switch-test")));
         assertTrue(JsonParser.parseString(Files.readString(report)).getAsJsonObject().getAsJsonArray("editResults")
@@ -88,6 +88,39 @@ class VoiceSwitchApplyTest {
         assertArrayEquals(published, Files.readAllBytes(journal));
         assertTrue(JsonParser.parseString(Files.readString(report)).getAsJsonObject().getAsJsonArray("editResults")
                 .toString().contains("\"voice-switch-test\""));
+
+        // Another writer inserts the same ID after the review captured the journal. Nothing of ours is written.
+        var later = edit.deepCopy();
+        later.addProperty("id", "voice-switch-later");
+        var offered = new JsonArray();
+        offered.add(later);
+        var captured = ReconstructionReview.revision(work);
+        ReconstructionEditCommand.run(work, "propose", later.deepCopy(), null, false, (done, total, message) -> {});
+        byte[] theirs = Files.readAllBytes(journal), built = Files.readAllBytes(report);
+        var stale = VoiceSwitchReview.apply(work, captured, offered, limit, java.util.Map.of());
+        assertTrue(stale.has("stale"));
+        assertTrue(stale.getAsJsonArray("edits").isEmpty());
+        assertArrayEquals(theirs, Files.readAllBytes(journal));
+        assertArrayEquals(built, Files.readAllBytes(report));
+
+        // A voice assigned by hand during the review does the same.
+        var third = edit.deepCopy();
+        third.addProperty("id", "voice-switch-third");
+        offered = new JsonArray();
+        offered.add(third);
+        captured = ReconstructionReview.revision(work);
+        Path voices = work.resolve(ReconstructionVoicePlan.JOURNAL);
+        Files.writeString(voices, "{\"version\":1,\"edits\":[]}");
+        assertTrue(VoiceSwitchReview.apply(work, captured, offered, limit, java.util.Map.of()).has("stale"));
+        assertEquals("{\"version\":1,\"edits\":[]}", Files.readString(voices));
+        assertArrayEquals(theirs, Files.readAllBytes(journal));
+        Files.delete(voices);
+
+        // So does an artifact that is no longer the one the review read.
+        var read = java.util.Map.of("voicing.json", new byte[0]);
+        assertTrue(VoiceSwitchReview.apply(work, ReconstructionReview.revision(work), offered, limit, read).has("stale"));
+        assertArrayEquals(theirs, Files.readAllBytes(journal));
+        assertArrayEquals(built, Files.readAllBytes(report));
     }
 
     private static int bankBytes(Path report) throws Exception {

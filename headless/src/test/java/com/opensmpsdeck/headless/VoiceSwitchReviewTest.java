@@ -83,6 +83,43 @@ class VoiceSwitchReviewTest {
         // The same evidence on a shared stem is offered for review, never applied.
         assertEquals("review", shared.passages().getFirst().confidence());
         assertTrue(shared.passages().getFirst().guards().stream().anyMatch(guard -> guard.name().equals("own stem") && !guard.pass()));
+
+        // With no note held past its attack there is no evidence of the held sound, so it is only offered.
+        var brief = new ArrayList<VoiceNoteDecode.Scored>();
+        for (var note : notes) brief.add(new VoiceNoteDecode.Scored(note.note(), note.frames(), note.weight(), note.scores(),
+                note.attack(), new float[]{Float.NaN, Float.NaN}));
+        var attacks = VoiceSwitchReview.report(1, "Lead", "lead.wav", true, 120,
+                new VoiceNoteDecode.Result(List.of(home, other), brief, labels), sound, catalogue, lanes, Set.of(), 4, false);
+        assertEquals("review", attacks.passages().getFirst().confidence());
+    }
+
+    @Test void aStretchThatIsOnlyAnotherRegisterOrSectionIsNotASwitch() {
+        var level = new ArrayList<VoiceNoteDecode.Scored>();
+        var raised = new ArrayList<VoiceNoteDecode.Scored>();
+        for (int i = 0; i < 120; i++) {
+            boolean away = i >= 40 && i < 70;
+            level.add(pitched(i, 60, away));
+            // The same evidence, but the stretch is also the only one played two octaves up.
+            raised.add(pitched(i, away ? 84 : 60, away));
+        }
+        // One register, one section: reshuffled, the notes never line up like this.
+        assertTrue(VoiceSwitchReview.chance(level, 40, 70, 1, 0, 1, new double[0]) <= .02);
+        // Every note of that register is in the stretch, so the register explains it as well as a switch does.
+        assertEquals(1, VoiceSwitchReview.chance(raised, 40, 70, 1, 0, 1, new double[0]), 1e-9);
+        // The same for a stretch that is exactly one section of the form.
+        assertEquals(1, VoiceSwitchReview.chance(level, 40, 70, 1, 0, 1, new double[]{0, 20, 35}), 1e-9);
+        // Inside a longer section it stands out again.
+        assertTrue(VoiceSwitchReview.chance(level, 40, 70, 1, 0, 1, new double[]{0, 10, 50}) <= .02);
+        // A patch that is a little better on every note is no switch at any length.
+        var everywhere = new ArrayList<VoiceNoteDecode.Scored>();
+        for (int i = 0; i < 120; i++) everywhere.add(pitched(i, 60, true));
+        assertEquals(1, VoiceSwitchReview.chance(everywhere, 40, 70, 1, 0, 1, new double[0]), 1e-9);
+    }
+
+    private static VoiceNoteDecode.Scored pitched(int index, int pitch, boolean away) {
+        float first = away ? .6f : .9f, second = away ? .9f : .6f;
+        return new VoiceNoteDecode.Scored(new VoiceNoteDecode.Note("n" + index, index * .5, index * .5 + .5, pitch), 40, 1,
+                new float[]{first, second}, new float[]{first, second}, new float[]{first, second});
     }
 
     @Test void aPassageOverANoteSomeoneVoicedIsLeftAlone() {
