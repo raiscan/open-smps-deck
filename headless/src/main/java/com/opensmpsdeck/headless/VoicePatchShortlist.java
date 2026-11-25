@@ -515,9 +515,11 @@ final class VoicePatchShortlist {
     ArrayList<RankedPatch> shortlist(List<RankedPatch> ranked, StockVoicePrior prior, int limit,
                                      ReconstructionHeldNotes.StockScreen sustain)
             throws IOException {
-        ranked.sort(Comparator.comparingDouble((RankedPatch patch) -> prior == null ? patch.score()
-                : patch.score() + prior.evidence(catalogue, catalogue.match(patch.id()).variant()).preference())
-                .reversed().thenComparing(RankedPatch::id));
+        // Names and retail use only order patches whose acoustic scores tie.
+        ranked.sort(Comparator.comparingDouble(RankedPatch::score).reversed()
+                .thenComparing(Comparator.comparingDouble((RankedPatch patch) -> prior == null ? 0
+                        : prior.evidence(catalogue, catalogue.match(patch.id()).variant()).preference()).reversed())
+                .thenComparing(RankedPatch::id));
         var retained = new ArrayList<RankedPatch>();
         RankedPatch fallback = null;
         double bestLoss = Double.POSITIVE_INFINITY;

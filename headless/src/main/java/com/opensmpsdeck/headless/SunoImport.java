@@ -1075,7 +1075,7 @@ public final class SunoImport {
         if (transcribersByRole.containsKey("drums") && drumDetector != null)
             throw new IllegalArgumentException("Choose either --transcriber-for drums=NAME or --drum-detector");
         String drum = config.drumName(transcribersByRole.getOrDefault("drums", drumDetector));
-        AudioDrumDetector.select(config, drum, device == null ? "auto" : device);
+        AudioDrumDetector.select(config, drum, device == null ? "auto" : device, mix.path);
         for (var entry : activeRoles.entrySet()) {
             String role = entry.getValue();
             if (role.equals("drums")) continue;

@@ -35,7 +35,13 @@ final class ReconstructionRoles {
     record Result(int version, double harmonyMaxHz, List<Decision> notes,
                   @ReconstructionStages.Nullable ReconstructionTimeMap.TimeBase timeBase,
                   @ReconstructionStages.Nullable Map<String, String> structureNoteHashes,
-                  @ReconstructionStages.Nullable Map<String, ReconstructionEdits.Pin> lanePins) {
+                  @ReconstructionStages.Nullable Map<String, ReconstructionEdits.Pin> lanePins,
+                  @ReconstructionStages.Nullable Map<String, ReconstructionRepeatConsensus.Member> repeatNotes) {
+        Result(int version, double harmonyMaxHz, List<Decision> notes, ReconstructionTimeMap.TimeBase timeBase,
+               Map<String, String> structureNoteHashes, Map<String, ReconstructionEdits.Pin> lanePins) {
+            this(version, harmonyMaxHz, notes, timeBase, structureNoteHashes, lanePins, null);
+        }
+
         Result(int version, double harmonyMaxHz, List<Decision> notes, ReconstructionTimeMap.TimeBase timeBase,
                Map<String, String> structureNoteHashes) {
             this(version, harmonyMaxHz, notes, timeBase, structureNoteHashes, null);
@@ -125,6 +131,7 @@ final class ReconstructionRoles {
                 restoreRegularLine(notes, roles, phraseReasons, Role.counter);
             }
         }
+        ReconstructionRepeatConsensus.alignBass(structure.repeatNotes(), tones, roles, programs, fixedGates, phraseReasons);
         Map<String, String> reasons = phraseReasons;
         if (plan != null) reasons.putAll(applyPlan(structure, roles, programs, plan, beatMap, evidence, accents));
         preferBendAttack(tones, roles, reasons);
@@ -156,7 +163,7 @@ final class ReconstructionRoles {
                 new Decision(decision.note(), decision.role(), null, decision.mergedInto(), decision.preLegatoEnd(),
                         assignmentReason(decision.role(), leadPart != null && leadPart == decision.note().part()))).toList();
         return new Result(VERSION, harmonyHz, explained, structure.timeBase(),
-                ReconstructionArtifacts.noteHashes(structure.notes()));
+                ReconstructionArtifacts.noteHashes(structure.notes()), null, structure.repeatNotes());
     }
 
     static String assignmentReason(Role role, boolean explicitLead) {

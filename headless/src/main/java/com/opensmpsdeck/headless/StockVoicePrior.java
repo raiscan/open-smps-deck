@@ -11,7 +11,7 @@ import java.util.Set;
 
 import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
 
-/** Small preferences for stock FM sounds with isolated S3K source stems. */
+/** Tie-breaking preferences for stock FM sounds with isolated S3K source stems. */
 final class StockVoicePrior {
     static final String REASON_PREFIX = "Chose ";
     private static final double NAME_WEIGHT = .025;

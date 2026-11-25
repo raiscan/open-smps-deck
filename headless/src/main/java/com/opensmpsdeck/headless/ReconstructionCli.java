@@ -108,6 +108,7 @@ final class ReconstructionCli {
     private ReconstructionCli() {}
 
     static void usage(PrintStream out) {
+        ReconstructionBranchCommand.usage(out);
         out.println("       reconstruct separate MIX OUT_DIR --separator NAME [--device auto|cpu|rocm|cuda]");
         out.println("           [--separator-config FILE]");
         out.println("       reconstruct import FOLDER WORK_DIR [--target s1|s2|s3k] [--drum-kit stock|custom] [--assign FILE=PART ...] [--exclude FILE ...]");
@@ -166,6 +167,14 @@ final class ReconstructionCli {
     static void run(String[] args, PrintStream out, PrintStream err) throws IOException {
         if (args.length == 2 && args[1].equals("--help")) {
             usage(out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("branch")) {
+            ReconstructionBranchCommand.run(List.of(args).subList(2, args.length), out);
+            return;
+        }
+        if (args.length >= 2 && List.of(args).contains("--branch")) {
+            ReconstructionBranchCommand.scoped(args[1], List.of(args).subList(2, args.length), out, err);
             return;
         }
         if (args.length >= 2 && args[1].equals("voices")) {
@@ -400,7 +409,7 @@ final class ReconstructionCli {
     static void assembleAllocated(Path work, ReconstructionStages.Score score, ReconstructionStructure.Result structure,
                                   ReconstructionAllocation.Result allocation, ReconstructionVoicing.Result voicing,
                                   PrintStream out, boolean preserveReview, boolean overwriteDetached, ReconstructionEdits intents,
-                                  List<ReconstructionEdits.Outcome> outcomes, boolean policyDecisions) throws IOException {
+                                  List<ReconstructionEdits.Outcome> outcomes, boolean policyDecisions, boolean heldNoteDiagnostics) throws IOException {
         Path destination = work.resolve(OUTPUTS.getFirst());
         var existing = ReconstructionReview.requireAttached(work, overwriteDetached);
         var inputs = score.inputs();
@@ -465,8 +474,10 @@ final class ReconstructionCli {
             }
             if (!allocation.chords().isEmpty()) report.add("chordVoicings", json.toJsonTree(allocation.chords()));
             report.add("sustainProbe", json.toJsonTree(sustain));
-            var heldNotes = matchQuietly(() -> ReconstructionHeldNotes.inspect(score, allocation, rendered));
-            if (heldNotes.sourceHolds() != 0) report.add("heldNotes", json.toJsonTree(heldNotes));
+            if (heldNoteDiagnostics) {
+                var heldNotes = matchQuietly(() -> ReconstructionHeldNotes.inspect(score, allocation, rendered));
+                if (heldNotes.sourceHolds() != 0) report.add("heldNotes", json.toJsonTree(heldNotes));
+            }
             var voicingWarnings = new ArrayList<String>();
             if (sustain.warning() != null) voicingWarnings.add(sustain.warning());
             if (voicing.leadProminenceWarning() != null) voicingWarnings.add(voicing.leadProminenceWarning());
@@ -1063,6 +1074,10 @@ final class ReconstructionCli {
 
     static String audioHash(Path path, java.nio.file.OpenOption... options) throws IOException {
         return evidence(path, options).sha256();
+    }
+
+    static String contentHash(Path path) throws IOException {
+        return evidence(path).sha256();
     }
 
     private static FileEvidence evidence(Path path, java.nio.file.OpenOption... options) throws IOException {

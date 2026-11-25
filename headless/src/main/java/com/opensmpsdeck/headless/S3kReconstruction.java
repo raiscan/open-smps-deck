@@ -444,6 +444,7 @@ final class S3kReconstruction {
         var psg = ReconstructionAllocation.PSG.stream().map(lane -> new ArrayList<Placement>()).toList();
         var dac = new ArrayList<Event>();
         var noiseFallbacks = new ArrayList<ReconstructionAllocation.Entry>();
+        var fallbackVoicings = new HashMap<String, ReconstructionDrums.NoiseFit>();
         Map<String, Voice> voices = new LinkedHashMap<>();
         Map<String, DacSample> samples = new LinkedHashMap<>();
         Map<String, Envelope> envelopes = new LinkedHashMap<>();
@@ -471,7 +472,7 @@ final class S3kReconstruction {
                         : !assignment.instrument().equals("fixed");
                 boolean closedHat = assignment == null ? ReconstructionCymbals.closedHat(note.pitch())
                         : assignment.instrument().equals("closed-hat");
-                var placed = psgDrum(entry, part, end, voice, envelopes, hatClock, decaying, closedHat, profile, catalogue,
+                var placed = psgDrum(entry, part, end, voice, envelopes, hatClock, decaying, closedHat, closedHat, profile, catalogue,
                         scopedDrumGains.get(entry.note().id()));
                 placed.assignedInstrument = assignment != null;
                 psg.get(2).add(placed);
@@ -490,6 +491,8 @@ final class S3kReconstruction {
             if (!fmOnly && lane.equals("DAC") && choice != null && choice.drums() != null
                     && "PSG3".equals(choice.drums().fallbackLane())) {
                 noiseFallbacks.add(entry);
+                var noise = choice.drums().noise();
+                if (noise != null) fallbackVoicings.put(entry.note().id(), noise);
                 continue;
             }
             if (choice == null || choice.assetId() == null) {
@@ -655,7 +658,7 @@ final class S3kReconstruction {
         boolean classicNoise = profile.envelopeGrammar() == TargetProfile.EnvelopeGrammar.HOLD_80
                 && (!noiseFallbacks.isEmpty() || psg.get(2).stream().anyMatch(p -> noiseKind(p) != PsgMode.TONE));
         if (classicNoise) reserveNoiseLane(psg.get(2), candidates, gates, reductions);
-        placeDacNoiseFallbacks(noiseFallbacks, psg.get(2), parts, psg3, envelopes, hatClock, gates, reductions, frames, profile, catalogue);
+        placeDacNoiseFallbacks(noiseFallbacks, fallbackVoicings, psg.get(2), parts, psg3, envelopes, hatClock, gates, reductions, frames, profile, catalogue);
         var tonePsg = classicNoise ? psg.subList(0, 2) : psg;
         int fmNotes = fm.stream().mapToInt(List::size).sum();
         int psgNotes = psg.stream().mapToInt(List::size).sum();
@@ -670,7 +673,7 @@ final class S3kReconstruction {
         var decisions = policyDecisions ? new ArrayList<ReconstructionLanePolicies.Decision>() : null;
         var coverage = applyLanePolicies(policies, levels, frames, fm, tonePsg, candidates, voices, envelopes, gates,
                 catalogue, sourceInstruments, parts, overlappingTone, layers, lanePolicyCopies, decisions, profile,
-                performance.gains());
+                performance.gains(), structure == null ? null : structure.repeatNotes());
         if (!coverage.isEmpty() || !layerResults.isEmpty()) {
             fmNotes = fm.stream().mapToInt(List::size).sum() - echoNotes;
             psgNotes = psg.stream().mapToInt(List::size).sum();
@@ -1029,7 +1032,7 @@ final class S3kReconstruction {
             InstrumentCatalogue catalogue, Map<String, ReconstructionVoicing.SourceSound> instruments,
             Map<Integer, MidiScore.Part> parts, int[] overlappingTone, Map<String, ReconstructionLayers.Request> layers,
             List<CopyWindow> copies, List<ReconstructionLanePolicies.Decision> decisions, TargetProfile profile,
-            Map<String, Double> gains) throws java.io.IOException {
+            Map<String, Double> gains, Map<String, ReconstructionRepeatConsensus.Member> repeatNotes) throws java.io.IOException {
         if (policies.isEmpty()) return List.of();
         var coverage = new ArrayList<ReconstructionLanePolicies.Coverage>();
         var claimed = new HashMap<PolicyKey, Set<String>>();
@@ -1055,7 +1058,36 @@ final class S3kReconstruction {
             var targetLanes = fmDouble ? fm : psg;
             var targetNames = fmDouble ? ReconstructionAllocation.FM : ReconstructionAllocation.PSG;
             int eligible = 0, count = 0, busy = 0, incompatible = 0, movedFromFm = 0;
-            for (var source : sources) {
+            var repeatGroups = new LinkedHashMap<String, List<PolicySource>>();
+            if (repeatNotes != null && !pads && scoped.notes() == null) {
+                for (var source : sources) {
+                    var dry = source.placed();
+                    var repeat = repeatNotes.get(source.origin());
+                    var mask = layers.get(source.origin());
+                    if (repeat == null || !repeat.keepsLanes() || moved.contains(dry) || mask != null && mask.settings().masks(kind)
+                            || !scoped.selects(source.entry(), source.origin(),
+                                    overlappingTone[dry.event.start()] == overlappingTone[dry.end])) continue;
+                    repeatGroups.computeIfAbsent(repeat.slot(), ignored -> new ArrayList<>()).add(source);
+                }
+            }
+            var groupBySource = new HashMap<PolicySource, List<PolicySource>>();
+            repeatGroups.values().stream().filter(group -> group.size() > 1).forEach(group ->
+                    group.forEach(source -> groupBySource.put(source, group)));
+            var ordered = sources;
+            if (!groupBySource.isEmpty()) {
+                ordered = new ArrayList<>();
+                var emitted = new HashSet<PolicySource>();
+                for (var source : sources) if (emitted.add(source)) {
+                    var group = groupBySource.get(source);
+                    if (group == null) ordered.add(source);
+                    else {
+                        ordered.addAll(group);
+                        emitted.addAll(group);
+                    }
+                }
+            }
+            var groupLanes = new HashMap<List<PolicySource>, Integer>();
+            for (var source : ordered) {
                 var entry = source.entry();
                 var dry = source.placed();
                 String id = entry.note().id();
@@ -1098,7 +1130,15 @@ final class S3kReconstruction {
                     // the same timbre as pads transferred from FM.
                     slot = new FreeSlot(original, entry.lane(), original.indexOf(dry));
                 } else {
-                    slot = freeSlot(targetLanes, targetNames, fmDouble ? entry.lane() : null, start, end);
+                    var group = groupBySource.get(source);
+                    if (group == null) {
+                        slot = freeSlot(targetLanes, targetNames, fmDouble ? entry.lane() : null, start, end);
+                    } else {
+                        int index = groupLanes.computeIfAbsent(group, occurrences ->
+                                commonLayerLane(occurrences, targetLanes, targetNames, rule.delay(), frames, fmDouble));
+                        int insertion = index < 0 ? -1 : insertion(targetLanes.get(index), start, end);
+                        slot = insertion < 0 ? null : new FreeSlot(targetLanes.get(index), targetNames.get(index), insertion);
+                    }
                 }
                 if (slot == null) {
                     busy++;
@@ -1107,7 +1147,8 @@ final class S3kReconstruction {
                     if (decisions != null) {
                         var blocked = blockers(targetLanes, targetNames, fmDouble ? entry.lane() : null, start, end);
                         policyDecision(decisions, scoped, source, blocked.isEmpty() ? null : blocked.getFirst().lane(),
-                                pitch, start, end, "No free lane for the full layer gate", blocked);
+                                pitch, start, end, groupBySource.containsKey(source)
+                                        ? "No common free lane for the repeat layer" : "No free lane for the full layer gate", blocked);
                     }
                     continue;
                 }
@@ -1279,6 +1320,27 @@ final class S3kReconstruction {
         return promoted;
     }
 
+    private static int commonLayerLane(List<PolicySource> group, List<ArrayList<Placement>> lanes,
+                                       List<String> names, int delay, int frames, boolean fmDouble) {
+        var ordered = group.stream().sorted(Comparator.comparingInt(s -> s.placed().event.start())).toList();
+        for (int i = 0; i < lanes.size(); i++) {
+            int previousEnd = 0;
+            boolean fits = true;
+            for (var source : ordered) {
+                int start = source.placed().event.start() + delay;
+                int end = Math.min(frames, source.placed().end + delay);
+                if (start < previousEnd || end <= start || fmDouble && names.get(i).equals(source.entry().lane())
+                        || insertion(lanes.get(i), start, end) < 0) {
+                    fits = false;
+                    break;
+                }
+                previousEnd = end;
+            }
+            if (fits) return i;
+        }
+        return -1;
+    }
+
     private static FreeSlot freeSlot(List<ArrayList<Placement>> lanes, List<String> names, String exclude, int start, int end) {
         for (int i = 0; i < lanes.size(); i++) {
             if (names.get(i).equals(exclude)) continue;
@@ -1324,13 +1386,14 @@ final class S3kReconstruction {
 
     private static Placement psgDrum(ReconstructionAllocation.Entry entry, MidiScore.Part part, int end,
                                      ReconstructionVoicing.Lane voice, Map<String, Envelope> envelopes,
-                                     ReconstructionVoicing.PsgPercussion hatClock, boolean decaying, boolean closedHat,
+                                     ReconstructionVoicing.PsgPercussion hatClock, boolean decaying, boolean closedHat, boolean dualClock,
                                      TargetProfile profile, InstrumentCatalogue catalogue, Double gain) {
         var note = entry.note().midi();
         closedHat &= decaying;
+        dualClock &= decaying;
         int pitch = decaying ? ReconstructionCymbals.pitch(profile) : 81;
         var pitched = new MidiScore.Note(note.partId(), pitch, note.velocity(), note.startUs(), note.endUs());
-        int level = closedHat ? ReconstructionCymbals.HAT_LEVEL : ReconstructionCymbals.NATIVE_LEVEL;
+        int level = dualClock ? ReconstructionCymbals.HAT_LEVEL : ReconstructionCymbals.NATIVE_LEVEL;
         int volume = decaying ? level << 3 : volume(part, note);
         var envelope = decaying ? catalogue.stockContour(profile.game(), ReconstructionCymbals.envelope(closedHat ? 42 : 46)) : null;
         String asset = envelope == null ? NOISE : envelope.id();
@@ -1341,15 +1404,15 @@ final class S3kReconstruction {
         placed.noteId = entry.note().id();
         placed.cymbalNoise = decaying && envelope != null;
         if (decaying) placed.detune = ReconstructionCymbals.detune(
-                closedHat ? hatClock.hatAttackPeriod() : ReconstructionCymbals.TONE_PERIOD, profile);
-        if (closedHat) {
+                dualClock ? hatClock.hatAttackPeriod() : ReconstructionCymbals.TONE_PERIOD, profile);
+        if (dualClock) {
             placed.hatClock = hatClock;
         }
         return placed;
     }
 
     private static void placeDacNoiseFallbacks(List<ReconstructionAllocation.Entry> fallbacks,
-            List<Placement> lane, Map<Integer, MidiScore.Part> parts, ReconstructionVoicing.Lane voice,
+            Map<String, ReconstructionDrums.NoiseFit> voicings, List<Placement> lane, Map<Integer, MidiScore.Part> parts, ReconstructionVoicing.Lane voice,
             Map<String, Envelope> envelopes, ReconstructionVoicing.PsgPercussion hatClock,
             List<VoicedGate> gates, List<Reduction> reductions, int frames, TargetProfile profile, InstrumentCatalogue catalogue) {
         if (fallbacks.isEmpty()) return;
@@ -1369,9 +1432,13 @@ final class S3kReconstruction {
                 continue;
             }
             int busy = occupied.nextSetBit(start);
-            int end = Math.min(busy < 0 ? frames : busy, start + ReconstructionCymbals.gate(note.pitch()));
+            // The drum fit may choose either native voicing for this hat or cymbal.
+            var fitted = voicings.get(entry.note().id());
+            boolean closed = fitted == null ? ReconstructionCymbals.closedHat(note.pitch()) : fitted.closed();
+            boolean dual = fitted == null ? closed : fitted.dualClock();
+            int end = Math.min(busy < 0 ? frames : busy, start + ReconstructionCymbals.gate(closed ? 42 : 46));
             var placed = psgDrum(entry, parts.get(note.partId()), end, voice, envelopes, hatClock,
-                    true, ReconstructionCymbals.closedHat(note.pitch()), profile, catalogue, null);
+                    true, closed, dual, profile, catalogue, null);
             lane.add(placed);
             gates.add(new VoicedGate(entry.note().id(), "PSG3", placed.event.note().pitch(), start, end, DAC_NOISE_FALLBACK));
             occupied.set(start, end);

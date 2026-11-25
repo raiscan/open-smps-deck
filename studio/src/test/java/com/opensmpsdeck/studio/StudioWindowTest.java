@@ -1250,6 +1250,122 @@ class StudioWindowTest {
         return work;
     }
 
+    @Test void sourceStemsSwitchPcmAndOverlaysWithoutReopeningTheLoopAndRestoreOnOpen() throws Exception {
+        var work = reconstructionFixture();
+        Files.createDirectory(work.resolve("stems"));
+        writeStemFixture(work.resolve("mix.wav"), 12_000, -8000);
+        writeStemFixture(work.resolve("stems/vocals.wav"), 7000, -3000);
+        writeStemFixture(work.resolve("stems/bass.wav"), 2000, 1000);
+        writeStemFixture(work.resolve("stems/piano.wav"), 5000, 4000);
+        writeStemFixture(work.resolve("render.wav"), -2000, -4000);
+        Files.writeString(work.resolve("separation.json"), """
+                {"tool":"synthetic","model":"fixture","version":"1","checkpointSha256":"%s",
+                 "settings":{},"stemOrder":["vocals","bass","piano"]}
+                """.formatted("0".repeat(64)));
+        var sink = new CapturedAudio();
+        var pane = fx(() -> new ReconstructionPane(stage, work, null, () -> null, sink::open));
+        var scene = pane.stage().getScene();
+        try {
+            await(() -> scene.lookup("#reconstruction-stem-piano") != null);
+            fx(() -> {
+                var view = pane.canvas();
+                assertFalse(view.dimmedSpectrum());
+                assertTrue(view.spectrumOverlays().isEmpty());
+                view.onRange.accept(new ReviewTransport.Range(.25, 1.75));
+                ((ToggleButton) scene.lookup("#reconstruction-stems")).fire();
+                @SuppressWarnings("unchecked")
+                var hearing = (ComboBox<ReconstructionTransport.Hearing>) scene.lookup("#reconstruction-hearing");
+                hearing.setValue(ReconstructionTransport.Hearing.AB);
+                ((Button) scene.lookup("#reconstruction-play")).fire();
+                return null;
+            });
+            var original = constantPcm(12_000, -8000);
+            sink.awaitBlock(0, block -> Arrays.equals(original, block), "original full-mix PCM");
+            int before = sink.blockCount();
+            fx(() -> {
+                ((ToggleButton) scene.lookup("#reconstruction-stem-piano")).fire();
+                assertTrue(pane.canvas().dimmedSpectrum());
+                assertEquals(List.of("vocals", "bass"), pane.canvas().spectrumOverlays().stream()
+                        .map(layer -> layer.audio().label()).toList());
+                reconstructionWorkspace(scene, "detail");
+                reconstructionWorkspace(scene, "review");
+                assertEquals(2, pane.canvas().spectrumOverlays().size());
+                return null;
+            });
+            var subset = constantPcm(9000, -2000);
+            sink.awaitBlock(before, block -> Arrays.equals(fadedPcm(12_000, -8000, 9000, -2000), block),
+                    "the 5 ms blend of the original and selected stems");
+            sink.awaitBlock(before, block -> Arrays.equals(subset, block), "sample-exact subset PCM");
+            assertEquals(1, sink.opens.get());
+            before = sink.blockCount();
+            fx(() -> {
+                ((ToggleButton) scene.lookup("#reconstruction-ab-side")).fire();
+                return null;
+            });
+            var chip = constantPcm(-2000, -4000);
+            sink.awaitBlock(before, block -> Arrays.equals(chip, block), "chip side PCM");
+            before = sink.blockCount();
+            fx(() -> {
+                ((ToggleButton) scene.lookup("#reconstruction-ab-side")).fire();
+                return null;
+            });
+            sink.awaitBlock(before, block -> Arrays.equals(subset, block), "A/B returned to selected stems");
+            assertEquals(1, sink.opens.get());
+        } finally {
+            fx(() -> { pane.close(); return null; });
+        }
+
+        var reopened = fx(() -> new ReconstructionPane(stage, work, null, () -> null, StudioTestAudio::line));
+        try {
+            var reopenedScene = reopened.stage().getScene();
+            await(() -> reopenedScene.lookup("#reconstruction-stem-piano") != null);
+            fx(() -> {
+                var vocals = (ToggleButton) reopenedScene.lookup("#reconstruction-stem-vocals");
+                ((ToggleButton) reopenedScene.lookup("#reconstruction-stems")).fire();
+                assertTrue(vocals.isSelected());
+                assertFalse(((ToggleButton) reopenedScene.lookup("#reconstruction-stem-piano")).isSelected());
+                assertTrue(reopened.canvas().dimmedSpectrum());
+                Event.fireEvent(vocals, new MouseEvent(MouseEvent.MOUSE_PRESSED, 2, 2, 2, 2,
+                        MouseButton.PRIMARY, 1, false, true, false, false, true, false, false,
+                        false, false, true, null));
+                assertEquals(List.of("vocals"), reopened.canvas().spectrumOverlays().stream()
+                        .map(layer -> layer.audio().label()).toList());
+                ((Button) reopenedScene.lookup("#reconstruction-stem-all")).fire();
+                assertFalse(reopened.canvas().dimmedSpectrum());
+                assertTrue(reopened.canvas().spectrumOverlays().isEmpty());
+                return null;
+            });
+        } finally {
+            fx(() -> { reopened.close(); return null; });
+        }
+    }
+
+    private static byte[] constantPcm(int left, int right) {
+        return fadedPcm(left, right, left, right);
+    }
+
+    private static byte[] fadedPcm(int fromLeft, int fromRight, int toLeft, int toRight) {
+        var pcm = new short[1600];
+        for (int frame = 0; frame < pcm.length / 2; frame++) {
+            double progress = Math.min(1, (frame + 1) / 240.0);
+            pcm[frame * 2] = (short) Math.round(fromLeft * (1 - progress) + toLeft * progress);
+            pcm[frame * 2 + 1] = (short) Math.round(fromRight * (1 - progress) + toRight * progress);
+        }
+        return pcmBytes(pcm);
+    }
+
+    private static void writeStemFixture(Path path, int left, int right) throws Exception {
+        var block = new short[1600];
+        for (int i = 0; i < block.length; i += 2) {
+            block[i] = (short) left;
+            block[i + 1] = (short) right;
+        }
+        Files.deleteIfExists(path);
+        com.opensmpsdeck.headless.WaveFile.write(path, 120, sink -> {
+            for (int i = 0; i < 120; i++) sink.accept(block);
+        });
+    }
+
     @Test void reconstructionMenuTransposeAndDeleteDuringLatePlaybackKeepTheAudioLine() throws Exception {
         var work = assembledLiveFixture(4800, 6100, 7);
         var loop = new ReviewTransport.Range(5, 7);
@@ -1282,7 +1398,7 @@ class StudioWindowTest {
             var playedBefore = sink.awaitBlock(blockInLoop, block -> true, "initial loop PCM");
             awaitLiveStatus(scene, "Live preview · Saved edits", () -> fx(() -> {
                 var menu = contextNote(view, view.selectedNotes().getFirst().id());
-                var transpose = (javafx.scene.control.Menu) menuItem(menu, "Transpose");
+                var transpose = (Menu) menuItem(menu, "Transpose");
                 var up = transpose.getItems().getFirst();
                 assertEquals("+1", up.getText());
                 assertFalse(up.isDisable());
@@ -1875,6 +1991,54 @@ class StudioWindowTest {
                   {"note":%s,"role":"melody","lane":"FM1","startTick":30,"endTick":90,"outcome":"kept"},
                   {"note":%s,"role":"drums","lane":"DAC","startTick":30,"endTick":31,"outcome":"kept"}]}
                 """.formatted(notes.get(0), drum));
+    }
+
+    @Test void repeatSettingsInRolesWriteAnUndoablePartPolicy() throws Exception {
+        var work = reconstructionFixture();
+        var scorePath = work.resolve("score.json");
+        var score = com.google.gson.JsonParser.parseString(Files.readString(scorePath)).getAsJsonObject();
+        var input = score.getAsJsonObject("inputs");
+        input.remove("midi");
+        input.getAsJsonObject("stems").addProperty("0", work.resolve("mix.wav").toString());
+        input.add("audioOnly", com.google.gson.JsonParser.parseString("""
+                {"source":"audio-only","stems":{"0":{"label":"synth","role":"other","transcriberRole":"other"}},
+                 "skippedStems":[],"drumDetector":{"name":"fixture","version":"1","hits":[]}}
+                """));
+        Files.writeString(scorePath, score.toString());
+        var pane = fx(() -> new ReconstructionPane(stage, work, null, () -> null, StudioTestAudio::line));
+        var scene = pane.stage().getScene();
+        try {
+            await(() -> scene.lookup("#reconstruction-canvas") != null);
+            fx(() -> {
+                reconstructionWorkspace(scene, "roles");
+                var menu = (MenuButton) scene.lookup("#reconstruction-repeat-settings");
+                assertTrue(menu.isVisible());
+                menu.show();
+                var part = (Menu) menu.getItems().getFirst();
+                assertEquals("reconstruction-repeat-part-0", part.getId());
+                var fill = (Menu) part.getItems().getFirst();
+                assertTrue(((RadioMenuItem) fill.getItems().getFirst()).isSelected());
+                fill.getItems().getLast().fire();
+                menu.hide();
+                menu.show();
+                part = (Menu) menu.getItems().getFirst();
+                fill = (Menu) part.getItems().getFirst();
+                assertTrue(((RadioMenuItem) fill.getItems().getLast()).isSelected());
+                var lanes = (Menu) part.getItems().getLast();
+                lanes.getItems().get(1).fire();
+                menu.hide();
+                ((MenuButton) scene.lookup("#reconstruction-history")).getItems().getFirst().fire();
+                menu.show();
+                part = (Menu) menu.getItems().getFirst();
+                lanes = (Menu) part.getItems().getLast();
+                assertTrue(((RadioMenuItem) lanes.getItems().getFirst()).isSelected());
+                menu.hide();
+                ((MenuButton) scene.lookup("#reconstruction-history")).getItems().getFirst().fire();
+                return null;
+            });
+        } finally {
+            fx(() -> { pane.stage().close(); return null; });
+        }
     }
 
     @Test void roleButtonsSelectAndExtendForKeyboardTranspose() throws Exception {
@@ -2530,6 +2694,191 @@ class StudioWindowTest {
         } finally {
             fx(() -> { pane.close(); return null; });
         }
+    }
+
+    @Test void reviewBranchesOverlayAuditionStitchAndUndo() throws Exception {
+        var work = StudioBranchFixture.create(folder.resolve("branches"));
+        StudioBranchFixture.branches(work);
+        var regionNoteId = com.opensmpsdeck.headless.ReconstructionBranches.show(work, "fable").edits().stream()
+                .filter(edit -> edit.get("id").getAsString().equals("fable-keys")).findFirst().orElseThrow()
+                .get("noteId").getAsString();
+        var audioLines = new java.util.concurrent.atomic.AtomicInteger();
+        var pane = fx(() -> new ReconstructionPane(stage, work, null, () -> null, format -> {
+            audioLines.incrementAndGet();
+            return StudioTestAudio.line(format);
+        }));
+        var scene = pane.stage().getScene();
+        try {
+            await(() -> scene.lookup("#reconstruction-canvas") != null);
+            fx(() -> {
+                reconstructionWorkspace(scene, "review");
+                return null;
+            });
+            await(() -> scene.lookup("#reconstruction-branch-astra") != null);
+            fx(() -> {
+                ((ToggleButton) scene.lookup("#reconstruction-branch-astra")).fire();
+                ((CheckBox) scene.lookup("#reconstruction-branch-overlay-astra")).fire();
+                return null;
+            });
+            awaitBranch(scene, () -> !pane.canvas().branchLayers().isEmpty());
+            fx(() -> {
+                reconstructionWorkspace(scene, "roles");
+                assertTrue(pane.branchBuildsStopped());
+                assertNoBranchStaging(work);
+                assertEquals(1, pane.canvas().branchLayers().size());
+                reconstructionWorkspace(scene, "detail");
+                assertEquals(1, pane.canvas().branchLayers().size());
+                reconstructionWorkspace(scene, "review");
+                ((CheckBox) scene.lookup("#reconstruction-branch-overlay-astra")).fire();
+                assertTrue(pane.canvas().branchLayers().isEmpty());
+                return null;
+            });
+
+            fx(() -> {
+                pane.canvas().onRange.accept(new ReviewTransport.Range(0, 3));
+                ((Button) scene.lookup("#reconstruction-branch-listen")).fire();
+                ((Button) scene.lookup("#reconstruction-play")).fire();
+                return null;
+            });
+            await(() -> liveStatusLabel(scene).getText().contains("B · astra"));
+            fx(() -> {
+                var versions = (ComboBox<?>) scene.lookup("#reconstruction-branch-variant");
+                versions.getSelectionModel().selectFirst();
+                return null;
+            });
+            awaitBranch(scene, () -> liveStatusLabel(scene).getText().equals("A · Parent"));
+            assertEquals(1, audioLines.get(), "Parent and branch share a single audio line");
+
+            fx(() -> {
+                ((Button) scene.lookup("#reconstruction-branch-take")).fire();
+                ((ToggleButton) scene.lookup("#reconstruction-branch-fable")).fire();
+                ((Button) scene.lookup("#reconstruction-branch-take")).fire();
+                return null;
+            });
+            awaitBranch(scene, () -> enabled(scene, "reconstruction-branch-keep-a-0"));
+            fx(() -> {
+                assertFalse(enabled(scene, "reconstruction-branch-apply"));
+                ((Button) scene.lookup("#reconstruction-branch-audition-b-0")).fire();
+                return null;
+            });
+            awaitBranch(scene, () -> liveStatusLabel(scene).getText().contains("Conflict B"));
+            fx(() -> {
+                ((Button) scene.lookup("#reconstruction-branch-keep-a-0")).fire();
+                return null;
+            });
+            awaitBranch(scene, () -> scene.lookup("#reconstruction-branch-keep-a-0") == null
+                    && enabled(scene, "reconstruction-branch-hear-merge"));
+            fx(() -> {
+                ((Button) scene.lookup("#reconstruction-branch-remove-1")).fire();
+                ((Button) scene.lookup("#reconstruction-branch-remove-0")).fire();
+                ((ToggleButton) scene.lookup("#reconstruction-branch-astra")).fire();
+                return null;
+            });
+            fx(() -> {
+                scope(scene, ReconstructionBranchReview.Scope.PART);
+                var parts = (ComboBox<?>) scene.lookup("#reconstruction-branch-take-part");
+                parts.getSelectionModel().select(1);
+                ((Button) scene.lookup("#reconstruction-branch-take")).fire();
+                ((ToggleButton) scene.lookup("#reconstruction-branch-fable")).fire();
+
+                scope(scene, ReconstructionBranchReview.Scope.REGION);
+                scene.getRoot().applyCss();
+                scene.getRoot().layout();
+                var region = (ToggleButton) scene.lookup("#reconstruction-branch-region");
+                assertFalse(region.isDisabled(), "Region tool is unavailable");
+                region.fire();
+                assertTrue(region.isSelected(), "Region tool did not arm");
+                assertFalse(pane.canvas().panning(), "The plot is still panning");
+                var canvas = pane.canvas().canvas;
+                double start = pane.inspection().overlays().stream()
+                        .filter(note -> note.id().equals(regionNoteId) && note.sounds())
+                        .findFirst().orElseThrow().interval().sourceStart();
+                double x0 = 76 + (canvas.getWidth() - 76) * (start - .08) / pane.inspection().duration();
+                double x1 = 76 + (canvas.getWidth() - 76) * (start + .08) / pane.inspection().duration();
+                var viewport = pane.canvas().scroll.lookup(".viewport");
+                var visible = canvas.sceneToLocal(viewport.localToScene(viewport.getLayoutBounds()));
+                double y0 = visible.getMinY() + visible.getHeight() * .35;
+                double y1 = visible.getMinY() + visible.getHeight() * .70;
+                mouse(canvas, MouseEvent.MOUSE_PRESSED, x0, y0, true);
+                mouse(canvas, MouseEvent.MOUSE_DRAGGED, x1, y1, true);
+                var outline = pane.canvas().getChildrenUnmodifiable().stream()
+                        .filter(javafx.scene.shape.Rectangle.class::isInstance)
+                        .map(javafx.scene.shape.Rectangle.class::cast).filter(Node::isVisible).findFirst().orElseThrow();
+                assertTrue(outline.getWidth() >= 2 && outline.getHeight() >= 2,
+                        "Lasso clipped to " + outline.getBoundsInLocal());
+                mouse(canvas, MouseEvent.MOUSE_RELEASED, x1, y1, false);
+                assertFalse(region.isSelected(), "Region tool did not complete the drag");
+                assertNotNull(scene.lookup("#reconstruction-branch-remove-1"), "No region added to the merge");
+                scope(scene, ReconstructionBranchReview.Scope.GROUP);
+                var groups = (ComboBox<?>) scene.lookup("#reconstruction-branch-take-group");
+                groups.getSelectionModel().select(1);
+                ((Button) scene.lookup("#reconstruction-branch-take")).fire();
+                return null;
+            });
+            awaitBranch(scene, () -> scene.lookup("#reconstruction-branch-remove-2") != null
+                    && (enabled(scene, "reconstruction-branch-apply") || enabled(scene, "reconstruction-branch-accept-ripple")));
+            fx(() -> {
+                if (enabled(scene, "reconstruction-branch-accept-ripple"))
+                    ((Button) scene.lookup("#reconstruction-branch-accept-ripple")).fire();
+                assertTrue(enabled(scene, "reconstruction-branch-apply"));
+                ((Button) scene.lookup("#reconstruction-branch-hear-merge")).fire();
+                return null;
+            });
+            awaitBranch(scene, () -> liveStatusLabel(scene).getText().contains("Merge draft"));
+            assertEquals(1, audioLines.get(), "Conflict alternatives and the merge share the same audio line");
+            fx(() -> {
+                ((Button) scene.lookup("#reconstruction-branch-apply")).fire();
+                return null;
+            });
+            awaitBranch(scene, () -> liveStatusLabel(scene).getText().contains("Saved edits"));
+            var revision = com.opensmpsdeck.headless.ReconstructionReview.revision(work);
+            var ids = revision.entries().asList().stream()
+                    .map(value -> value.getAsJsonObject().get("id").getAsString()).collect(java.util.stream.Collectors.toSet());
+            assertEquals(Set.of("astra-bass", "astra-response", "fable-keys", "fable-lead"), ids);
+            for (var entry : revision.entries()) assertTrue(entry.getAsJsonObject().has("provenance"));
+
+            fx(() -> {
+                Event.fireEvent(pane.canvas().canvas, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.Z,
+                        false, true, false, false));
+                return null;
+            });
+            awaitBranch(scene, () -> liveStatusLabel(scene).getText().isEmpty());
+            assertTrue(com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries().isEmpty());
+        } finally {
+            fx(() -> { pane.close(); return null; });
+            await(pane::branchBuildsStopped);
+            assertNoBranchStaging(work);
+        }
+    }
+
+    private static void assertNoBranchStaging(Path work) throws IOException {
+        var cache = work.resolve("edits/builds");
+        if (Files.isDirectory(cache)) try (var builds = Files.list(cache)) {
+            assertFalse(builds.anyMatch(path -> path.getFileName().toString().startsWith(".build-")),
+                    "A branch build left a staging directory");
+        }
+    }
+
+    private static void scope(javafx.scene.Scene scene, ReconstructionBranchReview.Scope scope) {
+        var chooser = (ComboBox<?>) scene.lookup("#reconstruction-branch-take-scope");
+        chooser.getSelectionModel().select(scope.ordinal());
+    }
+
+    private static void awaitBranch(javafx.scene.Scene scene, BooleanSupplier condition) throws Exception {
+        long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(25);
+        while (System.nanoTime() < end) {
+            if (fx(condition::getAsBoolean)) return;
+            String feedback = fx(() -> scene.lookup("#reconstruction-branch-feedback") instanceof Label label
+                    ? label.getText() : "");
+            if (feedback.startsWith("Could not")) fail(feedback);
+            Thread.sleep(35);
+        }
+        fail(fx(() -> scene.getRoot().lookupAll(".label").stream().filter(Label.class::isInstance)
+                .map(Label.class::cast).filter(Node::isVisible).map(Label::getText).toList().toString()));
+    }
+
+    private static boolean enabled(javafx.scene.Scene scene, String id) {
+        return scene.lookup("#" + id) instanceof Button button && !button.isDisabled();
     }
 
     @Test void reviewContextMenuOpensTheProposalTargetInDetail() throws Exception {

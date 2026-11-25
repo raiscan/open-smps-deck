@@ -300,6 +300,11 @@ public final class ExternalTranscribers {
 
     static <T> T invoke(List<String> template, String name, Path input, String role, String device,
                         OutputReader<T> reader) throws IOException {
+        return invoke(template, name, input, role, device, Map.of(), reader);
+    }
+
+    static <T> T invoke(List<String> template, String name, Path input, String role, String device,
+                        Map<String, String> environment, OutputReader<T> reader) throws IOException {
         require(LABEL.matcher(device).matches(), name, "invalid device");
         Path scratch = Files.createTempDirectory("opensmpsdeck-transcriber-");
         Path output = scratch.resolve("notes.json");
@@ -307,8 +312,10 @@ public final class ExternalTranscribers {
         try {
             var values = Map.of("input", input.toString(), "output", output.toString(), "role", role, "device", device);
             var command = ExternalCommands.expand(template, PLACEHOLDER, values);
-            var process = new ProcessBuilder(command).redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                    .redirectError(log.toFile()).start();
+            var builder = new ProcessBuilder(command).redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(log.toFile());
+            builder.environment().putAll(environment);
+            var process = builder.start();
             int status;
             try {
                 process.getOutputStream().close();

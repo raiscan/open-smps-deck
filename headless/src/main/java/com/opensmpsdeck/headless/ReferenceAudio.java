@@ -67,10 +67,11 @@ public record ReferenceAudio(float[] samples, int sampleRate) {
             long startFrame = Math.clamp((long) Math.floor(start * rate), 0, available);
             long endFrame = Math.clamp((long) Math.ceil(end * rate), startFrame, available);
             var mono = new float[Math.toIntExact(endFrame - startFrame)];
+            ByteBuffer buffer = null;
             for (int offset = 0; offset < mono.length; offset += rate) {
                 int count = Math.min(rate, mono.length - offset);
-                var data = readAt(channel, wave.dataStart() + (startFrame + offset) * format.frameBytes(),
-                        count * format.frameBytes());
+                var data = buffer = readAt(channel, wave.dataStart() + (startFrame + offset) * format.frameBytes(),
+                        count * format.frameBytes(), buffer);
                 for (int i = 0; i < count; i++) {
                     float first = sample(data, format);
                     mono[offset + i] = format.channels() == 1 ? first : (float) ((first + (double) sample(data, format)) * .5);
@@ -101,12 +102,13 @@ public record ReferenceAudio(float[] samples, int sampleRate) {
             if (allowMono && ((startFrame + frames - 1) * format.sampleRate() / rate >= available))
                 throw invalid("comparison range exceeds WAV duration: " + path);
             var output = new float[frames * 2];
+            ByteBuffer buffer = null;
             for (int first = 0; first < frames; first += rate) {
                 int end = Math.min(frames, first + rate);
                 long sourceFirst = (startFrame + first) * format.sampleRate() / rate;
                 long sourceEnd = Math.min(available, (startFrame + end - 1) * format.sampleRate() / rate + 2);
-                var data = readAt(channel, wave.dataStart() + sourceFirst * format.frameBytes(),
-                        Math.toIntExact((sourceEnd - sourceFirst) * format.frameBytes()));
+                var data = buffer = readAt(channel, wave.dataStart() + sourceFirst * format.frameBytes(),
+                        Math.toIntExact((sourceEnd - sourceFirst) * format.frameBytes()), buffer);
                 var decoded = new float[(int) (sourceEnd - sourceFirst) * channels];
                 for (int i = 0; i < decoded.length; i++) decoded[i] = sample(data, format);
                 for (int i = first; i < end; i++) {
@@ -150,11 +152,12 @@ public record ReferenceAudio(float[] samples, int sampleRate) {
             double sum = 0;
             int count = 0;
             int bin = 0;
+            ByteBuffer buffer = null;
             for (long first = 0; first < frames; first += sourceRate) {
                 if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Import cancelled");
                 int blockFrames = (int) Math.min(sourceRate, frames - first);
-                var data = readAt(channel, wave.dataStart() + first * format.frameBytes(),
-                        blockFrames * format.frameBytes());
+                var data = buffer = readAt(channel, wave.dataStart() + first * format.frameBytes(),
+                        blockFrames * format.frameBytes(), buffer);
                 for (int i = 0; i < blockFrames; i++) {
                     double left = sample(data, format);
                     double right = format.channels() == 1 ? left : sample(data, format);
@@ -267,7 +270,13 @@ public record ReferenceAudio(float[] samples, int sampleRate) {
     }
 
     private static ByteBuffer readAt(FileChannel channel, long position, int size) throws IOException {
-        var data = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN);
+        return readAt(channel, position, size, null);
+    }
+
+    /** Reads into {@code reuse} when it is large enough, so chunked scans allocate one buffer. */
+    private static ByteBuffer readAt(FileChannel channel, long position, int size, ByteBuffer reuse) throws IOException {
+        var data = reuse != null && reuse.capacity() >= size ? reuse.clear().limit(size)
+                : ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN);
         while (data.hasRemaining()) {
             int read = channel.read(data, position + data.position());
             if (read < 0) throw invalid("Unexpected end of RIFF/WAVE data");
