@@ -76,6 +76,8 @@ public final class StudioSurfaceCapture {
                 arrangement(run, window);
                 dialogs(run, window, size);
                 run.attempt("Analysis", () -> StudioAnalysisCapture.capture(run, window, inputs.work()));
+                if (Boolean.getBoolean("studio.capture.branches"))
+                    run.attempt("Edit branches", () -> StudioBranchCapture.capture(run, window.scene().getWindow()));
             });
             launch(Path.of("examples/native-evening-clock.smps.json").toAbsolutePath(),
                     window -> nativeProgram(run, window, size));

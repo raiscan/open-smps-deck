@@ -104,6 +104,13 @@ class ReconstructionEditsTest {
             cli("reconstruct", "run", "--from", "transcribe", full.toString(), "--keep-voicing");
             var canonical = ProjectExport.open(full);
             assertPcmEqual(TargetPlayback.prepare(canonical.project()), replay.playback(), target.id());
+            ReconstructionBranches.create(work, "audition", "agent fixture");
+            ReconstructionBranches.edit(work, "audition", edits, List.of(), java.util.Set.of());
+            var branch = ReconstructionBranches.build(work, "audition");
+            var branchPlayback = TargetPlayback.prepare(ProjectExport.open(branch).project());
+            assertEquals(target, branchPlayback.target());
+            assertPcmEqual(TargetPlayback.prepare(canonical.project()), branchPlayback, "branch " + target.id());
+            assertEquals(revision, ReconstructionReview.revision(work));
             assertEquals(com.opensmpsdeck.project.ProjectFormat.write(canonical.project()),
                     com.opensmpsdeck.project.ProjectFormat.write(export.project()));
             for (var format : ProjectExport.Format.values()) {
@@ -332,7 +339,8 @@ class ReconstructionEditsTest {
                 preview.allocation());
         assertPcmEqual(TargetPlayback.prepare(ReconstructionReview.arrangement(work).project()), preview.playback(),
                 "mixed live journal", 480);
-        assertEquals(java.util.EnumSet.allOf(ReconstructionEdits.Kind.class),
+        // Repeat policy replay uses the audio-only fixture in ReconstructionRepeatConsensusTest.
+        assertEquals(java.util.EnumSet.complementOf(java.util.EnumSet.of(ReconstructionEdits.Kind.repeatPolicy)),
                 ReconstructionEdits.read(work).intents().stream().map(ReconstructionEdits.Intent::kind)
                     .collect(java.util.stream.Collectors.toSet()));
         assertEquals(List.of("edit-cut-left", "edit-cut-right", "n-0-3500000-71"),
@@ -1284,7 +1292,7 @@ class ReconstructionEditsTest {
         return stdout.toString();
     }
 
-    private static void writeMidi(Path midi, boolean includeRemoved) throws Exception {
+    static void writeMidi(Path midi, boolean includeRemoved) throws Exception {
         var source = new Sequence(Sequence.PPQ, 480);
         var track = source.createTrack();
         for (int[] event : new int[][]{{60, 0, 420}, {64, 480, 720}, {67, 480, 770}, {62, 1200, 1450}}) {
@@ -1299,7 +1307,7 @@ class ReconstructionEditsTest {
         writeAudio(index, wav, false);
     }
 
-    private static void writeAudio(Path index, Path wav, boolean psg) throws Exception {
+    static void writeAudio(Path index, Path wav, boolean psg) throws Exception {
         writeAudio(index, wav, psg, 120);
     }
 

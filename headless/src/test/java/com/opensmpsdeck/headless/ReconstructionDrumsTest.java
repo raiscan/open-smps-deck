@@ -33,6 +33,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static com.opensmpsdeck.headless.ReconstructionRoles.Role.drums;
 
@@ -45,6 +46,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ReconstructionDrumsTest {
     @TempDir Path directory;
+    @Test void stockVoteMustAlsoCompeteOnClassAndReuse() {
+        var regular = new ReconstructionDrums.Candidate("regular", "a", "regular", 4, .10, null, 0., null);
+        var vote = new ReconstructionDrums.Candidate("vote", "b", "vote", 6, .11, null, .05, null);
+        assertEquals(.06, ReconstructionDrums.requiredVoteMargin(vote, regular, .10, true, Set.of(), Map.of()), 1e-9);
+        assertEquals(.18, ReconstructionDrums.requiredVoteMargin(vote, regular, .10, true,
+                Set.of(), Map.of("vote", 1)), 1e-9);
+    }
+
     @Test void tonalEnvelopeCannotOpenTheNoiseChannelInADrumSolo() throws Exception {
         byte[] raw = {0x40, (byte) 0x80};
         var mask = new S3kRenderer.ChannelMask(0x3f, 0x7);
@@ -543,6 +552,108 @@ class ReconstructionDrumsTest {
         var process = command.start();
         int status = process.waitFor();
         return new CommandResult(status, Files.readString(stdout) + (status == 0 ? "" : Files.readString(stderr)));
+    }
+
+    @Test void psgNoiseCompetesWithDacSamplesForHats() throws Exception {
+        // A mid-band noise burst that qualifies as a noise-like DAC hat.
+        int rate = 10;
+        double dacHz = DacSample.sampleRateHz(rate);
+        var random = new java.util.Random(7);
+        byte[] dull = new byte[(int) (dacHz * .12)];
+        double low = 0;
+        for (int i = 0; i < dull.length; i++) {
+            low += .8 * (random.nextGaussian() - low);
+            dull[i] = (byte) (128 + Math.round(Math.max(-127, Math.min(127, 300 * low * Math.exp(-30.0 * i / dacHz)))));
+        }
+        var builder = new InstrumentCatalogue.Builder();
+        String asset = builder.asset(InstrumentCatalogue.Kind.DAC_SAMPLE, "Dull burst", dull);
+        builder.variant(asset, "Dull burst", new InstrumentCatalogue.Recipe(rate, null, 127, 60,
+                null, null, List.of(), List.of()), null);
+        Path index = directory.resolve("catalogue.json");
+        builder.build().save(index);
+
+        Path midi = directory.resolve("hats.mid");
+        var sequence = new javax.sound.midi.Sequence(javax.sound.midi.Sequence.PPQ, 480);
+        var track = sequence.createTrack();
+        for (int hit = 0; hit < 6; hit++) midiNote(track, 9, 42, 480 + hit * 480);
+        MidiSystem.write(sequence, 0, midi.toFile());
+        double[] onsets = new double[6];
+        for (int hit = 0; hit < 6; hit++) onsets[hit] = .5 + hit * .5;
+
+        // Hits rendered from the native PSG3 closed-hat voicing choose that voicing.
+        Path psg = directory.resolve("psg.wav");
+        float[] native_ = ReconstructionCymbals.renderHit(true, true, com.opensmpsdeck.project.TargetProfile.S3K);
+        writeHits(psg, onsets, t -> {
+            int i = (int) (t * 48_000);
+            return i < native_.length ? native_[i] * 20 : 0f;
+        }, false);
+        var psgEvidence = hatEvidence(midi, psg, index, "psg");
+        assertTrue(psgEvidence.has("fallbackLane"), psgEvidence.toString());
+        assertEquals("PSG3", psgEvidence.get("fallbackLane").getAsString());
+        assertEquals("PSG3 noise closer than DAC", psgEvidence.get("reason").getAsString());
+        assertEquals("closed-hat", psgEvidence.getAsJsonObject("noise").get("voicing").getAsString());
+        assertTrue(psgEvidence.getAsJsonObject("noise").get("distance").getAsDouble()
+                < psgEvidence.getAsJsonObject("catalogue").get("distance").getAsDouble());
+        var project = ProjectFiles.load(directory.resolve("psg").resolve("arrangement.smps.json")).project();
+        assertTrue(project.samples().isEmpty());
+        assertTrue(project.clips().stream().anyMatch(clip -> clip.lane().equals("PSG3")));
+
+        // Hits that are the DAC sample's own playback keep the DAC sample.
+        Path own = directory.resolve("own.wav");
+        writeHits(own, onsets, t -> {
+            int i = (int) (t * dacHz);
+            return i < dull.length ? ((dull[i] & 0xFF) - 128) / 128f : 0f;
+        }, false);
+        var ownEvidence = hatEvidence(midi, own, index, "own");
+        assertFalse(ownEvidence.has("fallbackLane") && !ownEvidence.get("fallbackLane").isJsonNull());
+        assertEquals("catalogue fit", ownEvidence.get("reason").getAsString());
+    }
+
+    @Test void airMeasuresTheTopBandsAgainstTheUpperSpectrum() {
+        var bands = new java.util.ArrayList<Double>(java.util.Collections.nCopies(25, 0.0));
+        for (int i = 12; i < 21; i++) bands.set(i, .1);
+        assertEquals(0, ReconstructionDrums.air(bands), 1e-12);
+        for (int i = 21; i < 25; i++) bands.set(i, .1);
+        assertEquals(4 / 13.0, ReconstructionDrums.air(bands), 1e-12);
+        // Energy below about 580 Hz does not dilute the measure.
+        bands.set(0, 5.0);
+        assertEquals(4 / 13.0, ReconstructionDrums.air(bands), 1e-12);
+    }
+
+    private static void writeHits(Path wav, double[] onsets, java.util.function.DoubleFunction<Float> hit,
+                                  boolean highPass) throws Exception {
+        int frames = 240;
+        float[] audio = new float[frames * 800];
+        for (double onset : onsets) {
+            int start = (int) Math.round(onset * 48_000);
+            for (int i = 0; start + i < audio.length && i < 48_000 / 4; i++) audio[start + i] += hit.apply(i / 48_000.0);
+        }
+        if (highPass) {
+            double previous = 0, output = 0, retain = Math.exp(-2 * Math.PI * 7_000 / 48_000.0);
+            for (int i = 0; i < audio.length; i++) {
+                double input = audio[i];
+                output = retain * (output + input - previous);
+                previous = input;
+                audio[i] = (float) (3 * output);
+            }
+        }
+        WaveFile.write(wav, frames, sink -> {
+            var frame = new short[1600];
+            for (int tick = 0; tick < frames; tick++) {
+                for (int i = 0; i < 800; i++)
+                    frame[2 * i] = frame[2 * i + 1] = (short) Math.round(Math.max(-1, Math.min(1, audio[tick * 800 + i] * .5)) * 32767);
+                sink.accept(frame);
+            }
+        });
+    }
+
+    private com.google.gson.JsonObject hatEvidence(Path midi, Path wav, Path index, String name) throws Exception {
+        Path work = directory.resolve(name);
+        command("reconstruct", "run", midi.toString(), wav.toString(), index.toString(), work.toString(),
+                "--steady-tempo", "off", "--stem", "0=" + wav);
+        var json = ReconstructionArtifacts.readTree(work.resolve("voicing.json")).getAsJsonObject();
+        return json.getAsJsonObject("lanes").getAsJsonObject("DAC").getAsJsonArray("instruments").get(0)
+                .getAsJsonObject().getAsJsonObject("drumSelection").getAsJsonObject("evidence");
     }
 
     private static void midiNote(javax.sound.midi.Track track, int channel, int pitch, int tick) throws Exception {

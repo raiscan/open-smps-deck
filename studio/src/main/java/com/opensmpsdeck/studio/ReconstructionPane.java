@@ -58,6 +58,7 @@ final class ReconstructionPane implements AutoCloseable {
     private ReconstructionInspection model;
     private ReconstructionCanvas view;
     private ReconstructionEditor editor;
+    private ReconstructionBranchSession branches;
     private MenuButton laneFilters;
     private ReconstructionTransport listen;
     private boolean closed;
@@ -154,7 +155,8 @@ final class ReconstructionPane implements AutoCloseable {
         nextStep.textProperty().bind(editor.nextStep().textProperty());
         var tools = editor.toolbar();
         editor.initializeInspectors();
-        var footer = listen.bar();
+        branches = new ReconstructionBranchSession(work, view, editor, listen, status::setText);
+        var footer = listen.bar(branches.versionControl());
         var viewBar = displayControls();
         var viewToggle = new ToggleButton("Display ▾");
         viewToggle.setTooltip(new Tooltip(
@@ -203,6 +205,7 @@ final class ReconstructionPane implements AutoCloseable {
             boolean showReview = page == Workspace.Review;
             view.rolesView(showRoles);
             view.reviewing(showReview);
+            branches.reviewing(showReview);
             tools.setVisible(showNotes);
             lasso.setVisible(showRoles || showNotes);
             workspace.setVisible(page != Workspace.Export);
@@ -372,7 +375,7 @@ final class ReconstructionPane implements AutoCloseable {
         refreshLaneFilters();
         var row = new FlowPane(9, 6,
                 new Label("Time zoom"), zoom, fit, pitch, contrast,
-                new Label("Spectrum source"), sources, sharp, ridges, project, laneFilters, editor.visibility());
+                new Label("Spectrum source"), sources, sharp, ridges, project, laneFilters, editor.visibility(), listen.mixBackdropControl());
         row.getStyleClass().addAll("panelbar", "reconstruction-controls");
         row.setAlignment(Pos.CENTER_LEFT);
         return row;
@@ -395,9 +398,12 @@ final class ReconstructionPane implements AutoCloseable {
         return spacer;
     }
 
+    boolean branchBuildsStopped() { return branches == null || branches.buildsStopped(); }
+
     @Override public void close() {
         if (closed) return;
         closed = true;
+        if (branches != null) branches.close();
         if (listen != null) listen.close();
         if (editor != null) editor.close();
         if (view != null) view.close();

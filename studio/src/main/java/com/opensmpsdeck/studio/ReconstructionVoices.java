@@ -321,7 +321,7 @@ record ReconstructionVoices(List<Entry> entries, Map<String, Entry> byNote) {
         return slot;
     }
 
-    private static Color variantColor(int slot) {
+    static Color variantColor(int slot) {
         Color hue = HUES.get(slot % HUES.size());
         int variant = slot / HUES.size();
         if (variant == 0) return hue;

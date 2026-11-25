@@ -12,9 +12,9 @@ final class VoiceFit {
     // A near-tie that flipped the selected voice moved the fit error by about 0.18%.
     static final double INCUMBENT_MARGIN = .005;
 
+    /** A patch spectrum. The preference only settles exact acoustic ties. */
     record Candidate(String id, float[] spectrum, double preference) {
         Candidate(String id, float[] spectrum) { this(id, spectrum, 0); }
-        double adjusted(double loss) { return loss * (1 - preference); }
     }
     record Selection(Candidate candidate, double gain) {}
     record Trial(Selection selection, double fit, double check) {}
@@ -78,16 +78,23 @@ final class VoiceFit {
         var original = current();
         var best = original;
         var incumbent = selection(lane).candidate();
-        double originalFit = incumbent.adjusted(original.fit());
-        double originalCheck = incumbent.adjusted(original.check());
-        double bestFit = originalFit;
+        double originalFit = original.fit();
+        double originalCheck = original.check();
+        double bestFit = originalFit, bestCheck = originalCheck, bestPreference = incumbent.preference();
         for (var candidate : candidates) {
             var trial = trial(lane, candidate);
-            double candidateFit = candidate.adjusted(trial.fit());
+            double candidateFit = trial.fit();
             if (candidateFit < bestFit && improves(originalFit, candidateFit, relativeMargin)
-                    && improves(originalCheck, candidate.adjusted(trial.check()), relativeMargin)) {
+                    && improves(originalCheck, trial.check(), relativeMargin)) {
                 best = trial;
                 bestFit = candidateFit;
+                bestCheck = trial.check();
+                bestPreference = candidate.preference();
+            } else if (tied(bestFit, candidateFit) && tied(bestCheck, trial.check())
+                    && candidate.preference() > bestPreference) {
+                // Names and retail use only settle an acoustic tie.
+                best = trial;
+                bestPreference = candidate.preference();
             }
         }
         if (best == original) return false;
@@ -101,22 +108,20 @@ final class VoiceFit {
      * replaces the selection only then, and moves nothing else.
      */
     boolean challenge(int lane, Candidate challenger, double relativeMargin) {
-        var holder = selection(lane).candidate();
         var held = current();
         var trial = trial(lane, challenger);
-        if (!improves(holder.adjusted(held.fit()), challenger.adjusted(trial.fit()), relativeMargin)
-                || !improves(holder.adjusted(held.check()), challenger.adjusted(trial.check()), relativeMargin)) return false;
+        if (!improves(held.fit(), trial.fit(), relativeMargin)
+                || !improves(held.check(), trial.check(), relativeMargin)) return false;
         replace(lane, trial.selection());
         return true;
     }
 
     /** Whether the lane's current selection still beats another candidate by the margin on both losses. */
     boolean beats(int lane, Candidate other, double relativeMargin) {
-        var selected = selection(lane).candidate();
         var now = current();
         var trial = trial(lane, other);
-        return improves(other.adjusted(trial.fit()), selected.adjusted(now.fit()), relativeMargin)
-                && improves(other.adjusted(trial.check()), selected.adjusted(now.check()), relativeMargin);
+        return improves(trial.fit(), now.fit(), relativeMargin)
+                && improves(trial.check(), now.check(), relativeMargin);
     }
 
     /**
@@ -137,6 +142,10 @@ final class VoiceFit {
                 restored = true;
             }
         }
+    }
+
+    private static boolean tied(double a, double b) {
+        return Math.abs(a - b) <= 1e-9 * Math.max(1e-12, Math.max(Math.abs(a), Math.abs(b)));
     }
 
     private static boolean improves(double from, double to, double relativeMargin) {

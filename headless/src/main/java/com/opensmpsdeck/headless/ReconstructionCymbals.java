@@ -217,6 +217,69 @@ final class ReconstructionCymbals {
         return best;
     }
 
+    private static final Map<List<Object>, float[]> HITS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * One automatic PSG3 cymbal voicing as assembly plays it, as mono 48 kHz
+     * audio through the note's release. A dual-clock voicing switches from the
+     * hat attack clock to the decay clock with a hold, so the envelope continues.
+     * The PSG output is unipolar, so its mean steps with the volume envelope
+     * at frame boundaries. Each frame's mean is removed to measure the noise
+     * itself rather than those steps. Null for non-S3K targets.
+     */
+    static float[] renderHit(boolean closed, boolean dualClock, TargetProfile profile) {
+        if (profile.game() != TargetGame.S3K) return null;
+        var hat = ReconstructionVoicing.PSG_PERCUSSION.withHatDefaults();
+        return HITS.computeIfAbsent(List.of(profile, closed, dualClock), ignored -> {
+            var envelope = closed ? CLOSED : OPEN;
+            int ticks = envelope.bytes().size() - 1;
+            int note = pitch(profile);
+            var commands = new ArrayList<CommandEvent>();
+            var notes = new ArrayList<NoteEvent>();
+            commands.add(new CommandEvent("noise", 0, NativeCommand.PSG_NOISE,
+                    List.of(ReconstructionVoicing.PSG_PERCUSSION.noiseByte())));
+            int attack = dualClock ? hat.hatAttackPeriod() : TONE_PERIOD;
+            commands.add(new CommandEvent("detune", 0, NativeCommand.DETUNE, List.of(detune(attack, profile) & 255)));
+            int boundary = hat.hatSwitchTick();
+            if (dualClock && boundary < ticks && hat.hatDecayPeriod() != attack) {
+                notes.add(new NoteEvent("attack", 0, boundary, note));
+                commands.add(new CommandEvent("decay", boundary, NativeCommand.DETUNE,
+                        List.of(detune(hat.hatDecayPeriod(), profile) & 255)));
+                commands.add(new CommandEvent("hold", boundary, NativeCommand.HOLD, List.of()));
+                notes.add(new NoteEvent("tail", boundary, ticks - boundary, note));
+            } else {
+                notes.add(new NoteEvent("hit", 0, ticks, note));
+            }
+            int level = dualClock ? HAT_LEVEL : NATIVE_LEVEL;
+            int length = ticks + 12;
+            var sequence = new Sequence("hit", "hit", "PSG", length, null, level << 3, notes, commands,
+                    "RESET", envelope.id(), null);
+            var project = new StudioProject(4, "PSG cymbal probe", "S3K", 30, 0, List.of(), List.of(sequence),
+                    List.of(new Clip("hit", "hit", "PSG3", 0, length)),
+                    List.of(ReconstructionPsgEnvelopes.forProbe(envelope, profile.game(), ticks)), List.of(),
+                    profile.game(), null);
+            var clock = profile.clock().game() == profile.game() ? profile.clock() : TargetProfile.of(profile.game()).clock();
+            int frames = Math.toIntExact(clock.frameAtTick(ticks + 1));
+            float[] audio = new float[frames * 800];
+            int[] frame = {0};
+            try {
+                TargetPlayback.prepare(project).render(frames, pcm -> {
+                    int offset = frame[0]++ * 800;
+                    for (int i = 0; i < 800; i++) audio[offset + i] = (pcm[2 * i] + pcm[2 * i + 1]) / 65536f;
+                });
+            } catch (IOException failure) {
+                throw new java.io.UncheckedIOException(failure);
+            }
+            for (int start = 0; start < audio.length; start += 800) {
+                double mean = 0;
+                for (int i = start; i < start + 800; i++) mean += audio[i];
+                mean /= 800;
+                for (int i = start; i < start + 800; i++) audio[i] -= (float) mean;
+            }
+            return audio;
+        });
+    }
+
     private static final class Calibration {
         static final Map<TargetProfile, Map<String, double[]>> LEVELS = new java.util.concurrent.ConcurrentHashMap<>();
 
