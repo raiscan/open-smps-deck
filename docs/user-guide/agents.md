@@ -6,6 +6,25 @@ The skill starts with local stem separation and audio-only reconstruction,
 then covers time-coded review, edits and S3K export. Suno MIDI and stems
 or other aligned MIDI and audio can also seed a build.
 
+
+## Collaborate on edit branches
+
+Use a shared reconstruction work directory and give each contributor a
+branch. Pass `--branch NAME` to `reconstruct edit WORK add` to write
+journal intents to that branch and to `reconstruct run WORK` to get its
+isolated build. An edit can carry a `group` ID. Pass
+`--groups-file GROUPS.json` on branch edit add to supply an array of
+`{id, label, rationale}` objects for review. The same operation in MCP is
+`reconstruct_branch` with `action: "edit"`, `workDir`, `name`, `entries`
+and optional `groupMetadata`.
+
+Review note and voicing changes with `reconstruct branch diff WORK NAME`.
+Run a dry-run merge before stitching changes into a review branch or main.
+Filter by part, source time, group or edit ID. Use `branch rebase WORK NAME`
+to replay and inspect outcomes after main changes. Use
+`branch import WORK NAME COPY` to bring in a journal from an existing copy.
+[Branch commands and conflict rules](../architecture/edit-branches.md)
+
 ## Build the JAR and install the skill
 
 From the OpenSMPSDeck checkout:
@@ -295,6 +314,26 @@ and zero-based indices as strings. Use `reconstruct_edit` for note and lane
 changes. `render_clip` remains available for an excerpt of an existing
 project, with project-time `start` and `end` and optional `solo` or `mute`
 lanes. Use `render_compare` for a reconstruction against its aligned source.
+
+### Set repeat sensitivity by stem
+
+Use the part IDs from `reconstruct view` or Studio **Roles → Part repeats**.
+For a track with Brains-like bass and backing synth gaps, propose the settings
+as one edit batch. In Brains the bass is part 1 and the backing synth is part 3.
+
+```json
+[
+  {"id":"bass-repeats","reason":"Recover the repeating bass groove","op":"repeatPolicy","part":1,"fill":"high","lanes":"on"},
+  {"id":"synth-repeats","reason":"Recover repeating synth attacks","op":"repeatPolicy","part":3,"fill":"medium","lanes":"off"}
+]
+```
+
+Save the array to a file and pass it to `reconstruct edit "$work" propose --file FILE` or as `edits`
+to MCP `reconstruct_edit` with `action: "add"` and `propose: true`. Use
+`branch edit` to compare a separate journal. Both settings are Off for
+untouched parts. Increase the synth to High if the trace supports a missed
+attack. Check `structure.repeatConsensus` in the recovered note's trace and
+compare dry drops and shortened gates before accepting the settings.
 
 For Test in game, set the clean ROM with `rom_set` or pass a one-off
 absolute `rom` path to `rom_patch`. Supply an absolute `project` path and

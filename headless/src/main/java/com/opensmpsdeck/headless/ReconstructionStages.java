@@ -235,7 +235,7 @@ public final class ReconstructionStages {
     }
 
     static void run(String command, String[] args, PrintStream out, PrintStream err) throws IOException {
-        run(command, args, out, err, false, (completed, total, message) -> {}, ignored -> {}, null);
+        run(command, args, out, err, false, (completed, total, message) -> {}, ignored -> {}, null, true);
     }
 
     @FunctionalInterface
@@ -247,9 +247,16 @@ public final class ReconstructionStages {
     public static List<String> runForReview(String command, String[] args, Progress progress) throws IOException {
         var changes = new java.util.ArrayList<String>();
         try (var out = new PrintStream(java.io.OutputStream.nullOutputStream())) {
-            run(command, args, out, out, true, progress, changes::add, null);
+            run(command, args, out, out, true, progress, changes::add, null, true);
         }
         return List.copyOf(changes);
+    }
+
+    /** Branch playback needs the canonical bank and WAV, but can skip diagnostic re-renders. */
+    static void runForBranch(String[] args, Progress progress) throws IOException {
+        try (var out = new PrintStream(java.io.OutputStream.nullOutputStream())) {
+            run("run", args, out, out, true, progress, ignored -> {}, null, false);
+        }
     }
 
     record LiveCompilation(TargetPlayback playback, ReconstructionAllocation.Result allocation) {}
@@ -259,7 +266,7 @@ public final class ReconstructionStages {
     static LiveCompilation runForLive(String[] args, Progress progress, LoadedProject existing) throws IOException {
         var result = new LiveCompilation[1];
         try (var out = new PrintStream(java.io.OutputStream.nullOutputStream())) {
-            run("run", args, out, out, true, progress, ignored -> {}, new LiveRun(existing, playback -> result[0] = playback));
+            run("run", args, out, out, true, progress, ignored -> {}, new LiveRun(existing, playback -> result[0] = playback), true);
         }
         if (result[0] == null) throw new IOException("The reconstruction did not assemble");
         return result[0];
@@ -267,7 +274,7 @@ public final class ReconstructionStages {
 
     private static void run(String command, String[] args, PrintStream out, PrintStream err,
                             boolean preserveReview, Progress progress, java.util.function.Consumer<String> refitChange,
-                            LiveRun live)
+                            LiveRun live, boolean heldNoteDiagnostics)
             throws IOException {
         try (var capture = new ReconstructionManifest.Capture()) {
             Request request = request(command, args, progress, err, capture);
@@ -291,7 +298,7 @@ public final class ReconstructionStages {
             } else if (request.chain && !Files.exists(request.work.resolve(ReconstructionManifest.FILE))) {
                 ReconstructionManifest.resumed(request.work, readScore(request.work.resolve("score.json")), run, capture);
             }
-            execute(request, request.work, out, preserveReview, progress, refitChange, capture, live);
+            execute(request, request.work, out, preserveReview, progress, refitChange, capture, live, heldNoteDiagnostics);
             if (live != null) return;
             if (request.chain && request.initial == null)
                 ReconstructionManifest.resumed(request.work, readScore(request.work.resolve("score.json")), run, capture);
@@ -339,7 +346,7 @@ public final class ReconstructionStages {
         var transcription = transcribeWithSavedNotes(inputs, replay.manifest().durationUs());
         execute(new Request(work, Stage.TRANSCRIBE, true, transcription, replay.manifest().lastRun().harmonyMaxHz(),
                         java.util.Set.of(), false, keepVoicing, null, false, null, false), oldWork, out, false,
-                (completed, total, message) -> {}, ignored -> {}, null, null);
+                (completed, total, message) -> {}, ignored -> {}, null, null, true);
         ProjectProvenance.printWarnings(packageWarnings(work), err);
         summarizeEdits(work, err);
     }
@@ -379,7 +386,7 @@ public final class ReconstructionStages {
     private static void execute(Request request, Path previousWork, PrintStream out, boolean preserveReview,
                                 Progress progress,
                                 java.util.function.Consumer<String> refitChange,
-                                ReconstructionManifest.Capture capture, LiveRun live) throws IOException {
+                                ReconstructionManifest.Capture capture, LiveRun live, boolean heldNoteDiagnostics) throws IOException {
         int total = request.chain ? Stage.values().length - request.from.ordinal() : 1;
         Path work = request.work;
         Path scoreFile = work.resolve("score.json");
@@ -429,7 +436,7 @@ public final class ReconstructionStages {
                 if (live != null) replayScore = score;
                 switch (stage) {
                     case STRUCTURE -> {
-                        var detected = structure(score, editJournal.stages().getOrDefault("transcribe", List.of()));
+                        var detected = structure(score, editJournal.stages().getOrDefault("transcribe", List.of()), edits, outcomes);
                         ReconstructionArtifacts.write(structureFile, detected);
                         if (live != null) replayStructure = detected;
                     }
@@ -545,7 +552,9 @@ public final class ReconstructionStages {
                             voicing = voicing.withLanePolicies(preset);
                         }
                         if (live == null)
-                            ReconstructionCli.assembleAllocated(work, score, structure, allocation, voicing, out, preserveReview, request.overwriteDetached, edits, outcomes, request.policyDecisions);
+                            ReconstructionCli.assembleAllocated(work, score, structure, allocation, voicing, out,
+                                    preserveReview, request.overwriteDetached, edits, outcomes, request.policyDecisions,
+                                    heldNoteDiagnostics);
                         else live.result().accept(new LiveCompilation(
                                 ReconstructionCli.compileLive(work, score, structure, allocation, voicing, edits, outcomes,
                                         live.existing()), allocation));
@@ -674,8 +683,8 @@ public final class ReconstructionStages {
         } else {
             scoreEdits = prior.stages().getOrDefault("transcribe", List.of());
         }
-        var structure = from == Stage.TRANSCRIBE || Files.notExists(structureFile)
-                ? structure(score, scoreEdits) : readStructure(structureFile, score);
+        var structure = from.ordinal() <= Stage.STRUCTURE.ordinal() || Files.notExists(structureFile)
+                ? structure(score, scoreEdits, edits, outcomes) : readStructure(structureFile, score);
         var timeline = ReconstructionTimeMap.of(score);
         var plan = readRolePlan(work, structure, score);
         if (plan != null) plan = plan.projectBounds(timeline);
@@ -891,7 +900,7 @@ public final class ReconstructionStages {
                     : separateDrums(reference, extra.separatorConfig, progress, err, capture, chain);
             audio = ReconstructionAudioOnly.prepare(extra.audioStems, extra.stemRoles, config.fallback(transcriber, true),
                     AudioDrumDetector.select(config, config.drumName(drumOverride == null ? extra.drumDetector : drumOverride),
-                            device), duration / 1e6, extra.leadPart != null, mappedDrums ? null : drums,
+                            device, reference, index), duration / 1e6, extra.leadPart != null, mappedDrums ? null : drums,
                     mappedDrums ? null : reference);
             if (drums != null) capture.recordDrums(audio.drums().keySet(), drums);
             audio.drums().forEach((id, file) -> stems.put(id, file.toString()));
@@ -1188,15 +1197,16 @@ public final class ReconstructionStages {
         ReconstructionChecks.structure(structure, score);
         return new ReconstructionStructure.Result(structure.version(), structure.bars(), structure.sections(),
                 structure.repeats(), structure.corrections(), structure.notes().stream().sorted(NOTE_ORDER).toList(),
-                structure.phrases(), structure.roleLayout(), structure.timeBase(), structure.scoreNoteHashes());
+                structure.phrases(), structure.roleLayout(), structure.timeBase(), structure.scoreNoteHashes(), structure.repeatNotes());
     }
 
     static ReconstructionStructure.Result structure(Score score) throws IOException {
-        return structure(score, List.of());
+        return structure(score, List.of(), new ReconstructionEdits(List.of()), new ArrayList<>());
     }
 
-    private static ReconstructionStructure.Result structure(Score score, List<ReconstructionEdits.Outcome> edits)
-            throws IOException {
+    static ReconstructionStructure.Result structure(Score score, List<ReconstructionEdits.Outcome> scoreEdits,
+            ReconstructionEdits edits, List<ReconstructionEdits.Outcome> outcomes) throws IOException {
+        var policies = ReconstructionRepeatPolicy.resolve(score, edits, outcomes);
         boolean inferred = score.tempo != null && !score.tempo.source().equals("midi");
         boolean tracker = score.usesBeatGrid();
         double seconds = score.durationUs / 1e6;
@@ -1215,16 +1225,28 @@ public final class ReconstructionStages {
         }
         var authoredIds = new java.util.HashSet<String>();
         var suppressed = new ArrayList<Note>();
-        for (var edit : edits) {
+        for (var edit : scoreEdits) {
             if (!edit.authorsGate()) continue;
             authoredIds.addAll(edit.noteIds());
             if (edit.original() != null) suppressed.add(timeline.projectNote(edit.original()));
             if (edit.removedNotes() != null)
                 edit.removedNotes().forEach(note -> suppressed.add(timeline.projectNote(note)));
         }
-        return ReconstructionStructure.analyze(timeline.projectBars(bars), notes, score.source.parts(), audio,
+        var fillParts = policies.entrySet().stream()
+                .filter(entry -> entry.getValue().fill() != ReconstructionRepeatPolicy.Fill.off)
+                .map(Map.Entry::getKey).collect(java.util.stream.Collectors.toSet());
+        var detected = ReconstructionStructure.analyze(timeline.projectBars(bars), notes, score.source.parts(), audio,
                 inferred, tracker ? score.beatMap.beatsPerBar() : inferred ? score.tempo.selected().beatsPerBar() : 4,
-                roleBars, timeline, authoredIds, suppressed);
+                roleBars, timeline, authoredIds, suppressed, fillParts);
+        if (policies.isEmpty()) return detected;
+        var effective = new LinkedHashMap<String, Note>();
+        detected.notes().forEach(note -> effective.put(note.id(), note));
+        var repeatNotes = ReconstructionRepeatConsensus.apply(score, detected.bars(), timeline, authoredIds,
+                suppressed, effective, policies);
+        if (repeatNotes.isEmpty()) return detected;
+        return new ReconstructionStructure.Result(detected.version(), detected.bars(), detected.sections(),
+                detected.repeats(), detected.corrections(), effective.values().stream().sorted(NOTE_ORDER).toList(),
+                detected.phrases(), detected.roleLayout(), detected.timeBase(), detected.scoreNoteHashes(), repeatNotes);
     }
 
     private record RhythmKey(Path path, double seconds) {}

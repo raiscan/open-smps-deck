@@ -27,7 +27,7 @@ final class ReconstructionEdits {
     static final String FILE = "edits.json";
     static final String RESULTS = "edit-results.json";
 
-    enum Kind { insertNote, deleteNote, setNote, splitNote, retrigger, mergeNotes, transpose, setRole, pinLane, unmerge, bend, glide, swapRoles, setVelocity, arpeggio, chordInstrument, voiceEdit, noteVoicing, layer }
+    enum Kind { insertNote, deleteNote, setNote, splitNote, retrigger, mergeNotes, transpose, setRole, pinLane, unmerge, bend, glide, swapRoles, setVelocity, arpeggio, chordInstrument, voiceEdit, noteVoicing, layer, repeatPolicy }
     enum Status { applied, satisfied, orphaned, invalid, conflict }
 
     record Span(double start, double end, String section) {
@@ -61,6 +61,7 @@ final class ReconstructionEdits {
         Stage firstStage() {
             return switch (kind) {
                 case insertNote, deleteNote, setNote, splitNote, retrigger, mergeNotes, transpose, bend, glide, setVelocity -> Stage.TRANSCRIBE;
+                case repeatPolicy -> Stage.STRUCTURE;
                 case setRole, swapRoles, pinLane, unmerge -> Stage.ROLES;
                 case voiceEdit -> Stage.VOICES;
                 case arpeggio, chordInstrument -> Stage.ALLOCATE;
@@ -238,7 +239,7 @@ final class ReconstructionEdits {
         require(id.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,95}"), at + ".id", "expected 1–96 letters, digits, dots, underscores or hyphens");
         string(json, "reason", at);
         Kind kind = choice(Kind.class, json, "op", at);
-        var allowed = new LinkedHashSet<>(Set.of("id", "reason", "op", "timeBase", "author", "status", "group", "evidence", "proposalRevised"));
+        var allowed = new LinkedHashSet<>(Set.of("id", "reason", "op", "timeBase", "author", "status", "group", "evidence", "proposalRevised", "provenance"));
         allowed.addAll(switch (kind) {
             case insertNote -> List.of("part", "start", "end", "pitch", "velocity", "lane", "role");
             case deleteNote -> List.of("noteId", "selector");
@@ -250,6 +251,7 @@ final class ReconstructionEdits {
             case setRole -> List.of("noteIds", "selector", "span", "part", "pitchMin", "pitchMax", "fromRole", "role", "lane", "selectors", "voice", "others");
             case swapRoles -> List.of("span", "part", "from", "to", "voice");
             case voiceEdit -> List.of("voiceEdit");
+            case repeatPolicy -> List.of("part", "fill", "lanes");
             case layer -> List.of("noteIds", "selector", "selectors", "span", "part", "pitchMin", "pitchMax",
                     "fromRole", "mode", "laneType", "delayFrames", "attenuation", "levelDb", "detune", "octave", "volumeDecay", "policies");
             case noteVoicing -> List.of("noteIds", "instrument", "laneType", "vibrato", "vibratoEnvelope", "modulationOff");
@@ -271,6 +273,14 @@ final class ReconstructionEdits {
             require(json.has("author") && string(json, "author", at).equals("agent"),
                     at + ".author", "proposed edits require an agent author");
         if (json.has("group")) string(json, "group", at);
+        if (json.has("provenance")) {
+            require(json.get("provenance").isJsonObject(), at + ".provenance", "expected an object");
+            var source = json.getAsJsonObject("provenance");
+            fields(source, at + ".provenance", Set.of("branch", "author", "group"));
+            string(source, "branch", at + ".provenance");
+            string(source, "author", at + ".provenance");
+            if (source.has("group")) string(source, "group", at + ".provenance");
+        }
         if (json.has("proposalRevised"))
             require(json.get("proposalRevised").equals(new com.google.gson.JsonPrimitive(true)),
                     at + ".proposalRevised", "expected true");
@@ -403,6 +413,10 @@ final class ReconstructionEdits {
                 span = span(json, at, part);
             }
             case voiceEdit -> ReconstructionVoicePlan.reviewEdit(json, at);
+            case repeatPolicy -> {
+                require(part != null, at + ".part", "required");
+                ReconstructionRepeatPolicy.parse(json, at);
+            }
             case noteVoicing -> {
                 ids = noteIds(json, at, 1);
                 ReconstructionNoteVoicing.validate(json, laneType, at);
@@ -1118,7 +1132,7 @@ final class ReconstructionEdits {
         int order = 0;
         for (Intent edit : intents) {
             order++;
-            if (edit.firstStage().ordinal() > Stage.ROLES.ordinal()) continue;
+            if (edit.firstStage() != Stage.TRANSCRIBE && edit.firstStage() != Stage.ROLES) continue;
             var scoreResult = scoreResults.get(edit.id);
             if (edit.kind == Kind.transpose) {
                 if (scoreResult != null && scoreResult.status == Status.applied) {
@@ -1268,7 +1282,7 @@ final class ReconstructionEdits {
         }
         return new ReconstructionRoles.Result(roles.version(), roles.harmonyMaxHz(), decisions.values().stream()
                 .sorted(java.util.Comparator.comparing(ReconstructionRoles.Decision::note, NOTE_ORDER)).toList(),
-                roles.timeBase(), roles.structureNoteHashes(), pins.isEmpty() ? null : pins);
+                roles.timeBase(), roles.structureNoteHashes(), pins.isEmpty() ? null : pins, roles.repeatNotes());
     }
 
     private static boolean matchesRole(Intent edit, Role incoming, Role target) {

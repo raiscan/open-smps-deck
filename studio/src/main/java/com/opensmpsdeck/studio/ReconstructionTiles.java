@@ -2,14 +2,17 @@ package com.opensmpsdeck.studio;
 
 import com.opensmpsdeck.headless.ReconstructionInspection;
 import com.opensmpsdeck.headless.ReconstructionInspection.AudioSource;
+import com.opensmpsdeck.headless.ReconstructionInspection.PitchRange;
 import com.opensmpsdeck.headless.ReconstructionInspection.Ridge;
 import com.opensmpsdeck.headless.ReconstructionInspection.SpectrumTile;
 import javafx.application.Platform;
 import javafx.scene.image.PixelFormat;
 import javafx.scene.image.WritableImage;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -75,7 +78,12 @@ final class ReconstructionTiles implements AutoCloseable {
         int floor() { return ceiling - range; }
     }
 
-    record ImageKey(Key tile, Contrast contrast) {}
+    static final int OPAQUE = -1;
+    static final int SOLO = -2;
+
+    record ImageKey(Key tile, Contrast contrast, int tint) {
+        ImageKey(Key tile, Contrast contrast) { this(tile, contrast, OPAQUE); }
+    }
     record Tile(WritableImage image, List<Ridge> ridges) {}
 
     // Magma anchors: dark for quiet bins, bright for strong partials, evenly spaced in lightness.
@@ -100,30 +108,53 @@ final class ReconstructionTiles implements AutoCloseable {
         return PALETTE[(int) Math.round(level * 255)];
     }
 
+    /** Histogram bins per dB, and the levels the histogram covers. */
+    private static final int BINS_PER_DB = 4, QUIETEST_DB = -150, LOUDEST_DB = 10;
+
+    /** Counts a tile's finite levels above -150 dBFS in quarter-dB bins. */
+    static int[] histogram(float[] levels) {
+        var counts = new int[(LOUDEST_DB - QUIETEST_DB) * BINS_PER_DB];
+        for (float value : levels) {
+            if (!Float.isFinite(value) || value <= QUIETEST_DB) continue;
+            counts[Math.min(counts.length - 1, (int) ((value - QUIETEST_DB) * BINS_PER_DB))]++;
+        }
+        return counts;
+    }
+
+    static Contrast autoContrast(List<float[]> levels) {
+        return autoContrastFromHistograms(levels.stream().map(ReconstructionTiles::histogram).toList());
+    }
+
     /**
      * Chooses a contrast from measured levels: the loudest half-percent reaches the top
      * and the quieter 40% sits at the bottom, so background stays dark and quiet stems fill the scale.
+     * Tiles keep histograms, so this costs the same however many cells are visible.
      */
-    static Contrast autoContrast(List<float[]> levels) {
-        int total = 0;
-        for (var tile : levels) total += tile.length;
-        if (total == 0) return null;
-        int stride = Math.max(1, total / 60_000);
-        var samples = new float[total / stride + levels.size()];
-        int count = 0, seen = 0;
-        for (var tile : levels) {
-            for (float value : tile) {
-                if (seen++ % stride != 0) continue;
-                if (Float.isFinite(value) && value > -150) samples[count++] = value;
+    static Contrast autoContrastFromHistograms(List<int[]> histograms) {
+        if (histograms.isEmpty()) return null;
+        var counts = new long[histograms.getFirst().length];
+        long count = 0;
+        for (var histogram : histograms)
+            for (int bin = 0; bin < counts.length; bin++) {
+                counts[bin] += histogram[bin];
+                count += histogram[bin];
             }
-        }
         if (count < 64) return null;
-        java.util.Arrays.sort(samples, 0, count);
-        double top = samples[Math.min(count - 1, (int) (count * .995))];
-        double bottom = samples[(int) (count * .40)];
+        double top = level(counts, Math.min(count - 1, (long) (count * .995)));
+        double bottom = level(counts, (long) (count * .40));
         int ceiling = (int) Math.clamp(Math.ceil(top), -80, 0);
         int range = (int) Math.clamp(Math.round(ceiling - bottom), 20, 85);
         return new Contrast(ceiling, range);
+    }
+
+    /** The centre level of the bin holding the value of the given rank. */
+    private static double level(long[] counts, long rank) {
+        long seen = 0;
+        for (int bin = 0; bin < counts.length; bin++) {
+            seen += counts[bin];
+            if (seen > rank) return QUIETEST_DB + (bin + .5) / BINS_PER_DB;
+        }
+        return LOUDEST_DB;
     }
 
     private final ReconstructionInspection model;
@@ -133,11 +164,24 @@ final class ReconstructionTiles implements AutoCloseable {
             sized(MEASURED_CELLS, (SpectrumTile tile) -> tile.dbfs().length));
     private final Map<ImageKey, Tile> displayed = sized(DISPLAYED_CELLS,
             (Tile tile) -> (long) (tile.image().getWidth() * tile.image().getHeight()));
-    private final Map<ImageKey, Future<?>> pending = new HashMap<>();
-    private final Set<ImageKey> failures = Collections.newSetFromMap(lru(64));
+    private static final class Measurement {
+        private Future<?> future;
+    }
+
+    // About 2.5 kB each, so the cap covers the measured cache at its sparsest.
+    private final Map<Key, int[]> histograms = Collections.synchronizedMap(lru(2048));
+    private final Map<Key, Measurement> pending = new HashMap<>();
+    private final Set<Key> failures = Collections.newSetFromMap(lru(64));
     private final java.util.concurrent.ExecutorService workers = Executors.newFixedThreadPool(
             Math.clamp(Runtime.getRuntime().availableProcessors() / 2, 2, 4),
             runnable -> Thread.ofPlatform().daemon().name("reconstruction-spectrum").unstarted(runnable));
+    // Colouring takes a fraction of a millisecond per tile, so one thread keeps up and never
+    // waits behind measurements.
+    private final java.util.concurrent.ExecutorService painters = Executors.newSingleThreadExecutor(
+            runnable -> Thread.ofPlatform().daemon().name("reconstruction-colour").unstarted(runnable));
+    private final Map<ImageKey, Future<?>> colouring = new HashMap<>();
+    private record Layer(Key tile, int tint) {}
+    private final Map<Layer, ImageKey> latest = lru(4096);
     private boolean closed;
 
     ReconstructionTiles(ReconstructionInspection model, Runnable repaint, Consumer<String> error) {
@@ -179,30 +223,63 @@ final class ReconstructionTiles implements AutoCloseable {
         };
     }
 
-    /**
-     * Returns a displayable tile. A tile already measured under another contrast is recolored here,
-     * which is cheap, so contrast changes never blank the plot.
-     */
+    /** Returns the tile coloured for this key, or null while it is measured or coloured. */
     Tile get(ImageKey key) {
+        return displayed.get(key);
+    }
+
+    /**
+     * Returns the tile coloured for this key, or the same measurement under the contrast it was
+     * last coloured with. A contrast change then keeps the plot filled while workers recolour it.
+     */
+    Tile latest(ImageKey key) {
         var tile = displayed.get(key);
         if (tile != null) return tile;
-        var data = measured.get(key.tile());
-        if (data == null) return null;
-        tile = new Tile(image(data, colors(data, key.contrast())), data.ridges());
-        displayed.put(key, tile);
-        return tile;
+        var previous = latest.get(new Layer(key.tile(), key.tint()));
+        return previous == null ? null : displayed.get(previous);
     }
 
-    /** Measured dBFS levels for a tile, if they are cached. */
-    float[] levels(Key key) {
+    private void show(ImageKey key, SpectrumTile data, int[] pixels) {
+        displayed.put(key, new Tile(image(data, pixels), data.ridges()));
+        latest.put(new Layer(key.tile(), key.tint()), key);
+    }
+
+    /** The level histogram of a measured tile, or null while it is not measured. */
+    int[] histogram(Key key) {
+        var cached = histograms.get(key);
+        if (cached != null) return cached;
         var data = measured.get(key);
-        return data == null ? null : data.dbfs();
+        if (data == null) return null;
+        cached = histogram(data.dbfs());
+        histograms.put(key, cached);
+        return cached;
     }
 
-    private static int[] colors(SpectrumTile data, Contrast contrast) {
+    private static int[] colors(SpectrumTile data, ImageKey key) {
         int[] pixels = new int[data.dbfs().length];
-        for (int i = 0; i < pixels.length; i++) pixels[i] = color(data.dbfs()[i], contrast);
+        for (int i = 0; i < pixels.length; i++) {
+            int base = color(data.dbfs()[i], key.contrast());
+            pixels[i] = key.tint() == OPAQUE ? base : overlayColor(base, data.dbfs()[i], key);
+        }
         return pixels;
+    }
+
+    private static int overlayColor(int base, float dbfs, ImageKey key) {
+        double level = Math.clamp((dbfs - key.contrast().floor()) / key.contrast().range(), 0, 1);
+        boolean solo = key.tint() == SOLO;
+        // Reveal the mix through quiet bins. Keep the original ramp's lightness variation
+        // and move its hue toward the stem swatch in stronger bins.
+        double alpha = solo ? Math.min(1, level * 2) : .8 * level * Math.sqrt(level);
+        int red = channel(base, key.tint(), 16, level, alpha);
+        int green = channel(base, key.tint(), 8, level, alpha);
+        int blue = channel(base, key.tint(), 0, level, alpha);
+        return (int) (255 * alpha) << 24 | red << 16 | green << 8 | blue;
+    }
+
+    private static int channel(int base, int tint, int shift, double level, double alpha) {
+        int value = base >> shift & 255;
+        if (tint >= 0) value = (int) (.35 * value + .65 * (tint >> shift & 255) * level);
+        return (int) (value * alpha);
     }
 
     private static WritableImage image(SpectrumTile data, int[] pixels) {
@@ -213,55 +290,116 @@ final class ReconstructionTiles implements AutoCloseable {
     }
 
     void request(Set<ImageKey> visible) {
+        var visibleMeasurements = visible.stream().map(ImageKey::tile).collect(java.util.stream.Collectors.toSet());
+        // Octave blocks of one time slice share a measurement, so cancel it only
+        // when none of its blocks is wanted any more.
+        var dropped = new ArrayList<Measurement>();
         pending.entrySet().removeIf(entry -> {
+            if (visibleMeasurements.contains(entry.getKey())) return false;
+            dropped.add(entry.getValue());
+            return true;
+        });
+        var wanted = Collections.newSetFromMap(new IdentityHashMap<Measurement, Boolean>());
+        wanted.addAll(pending.values());
+        for (var measurement : dropped) if (!wanted.contains(measurement)) measurement.future.cancel(false);
+        colouring.entrySet().removeIf(entry -> {
             if (visible.contains(entry.getKey())) return false;
             entry.getValue().cancel(false);
             return true;
         });
-        for (var key : visible) {
-            if (displayed.containsKey(key) || pending.containsKey(key) || failures.contains(key)) continue;
-            if (measured.containsKey(key.tile())) {
-                get(key);
+        var groups = new LinkedHashMap<Slice, List<ImageKey>>();
+        for (var imageKey : visible) {
+            var key = imageKey.tile();
+            if (displayed.containsKey(imageKey) || colouring.containsKey(imageKey) || failures.contains(key)) continue;
+            var data = measured.get(key);
+            if (data != null) {
+                colouring.put(imageKey, painters.submit(() -> colour(imageKey, data)));
                 continue;
             }
-            pending.put(key, workers.submit(() -> prepare(key)));
+            // A measurement already under way is coloured by the next request after it lands.
+            if (pending.containsKey(key)) continue;
+            groups.computeIfAbsent(new Slice(key.source(), key.level(), key.index(), key.rows(), key.reassigned()),
+                    ignored -> new ArrayList<>()).add(imageKey);
+        }
+        for (var group : groups.values()) {
+            var measurement = new Measurement();
+            for (var imageKey : group) pending.put(imageKey.tile(), measurement);
+            measurement.future = workers.submit(() -> prepare(group, measurement));
         }
     }
 
-    private void prepare(ImageKey imageKey) {
-        var key = imageKey.tile();
+    private void colour(ImageKey key, SpectrumTile data) {
+        var pixels = colors(data, key);
+        Platform.runLater(() -> {
+            if (closed) return;
+            colouring.remove(key);
+            show(key, data, pixels);
+            repaint.run();
+        });
+    }
+
+    /** Tiles that differ only in octave block, which one pass over the audio measures together. */
+    private record Slice(AudioSource source, int level, int index, int rows, boolean reassigned) {}
+
+    /** Measures a slice's blocks and colours them for the requested contrasts and tints. */
+    private void prepare(List<ImageKey> group, Measurement measurement) {
         try {
-            var spectrum = measured.get(key);
-            if (spectrum == null) {
-                var full = model.spectrum(key.source(), key.start(), key.end(), WIDTH, key.low(), key.high(),
-                        key.rows(), key.reassigned());
-                // The edge rows have only one neighbour, so their peaks are not ridges.
-                var ridges = full.ridges().stream()
-                        .filter(ridge -> ridge.pitch() >= key.low() && ridge.pitch() <= key.high()).toList();
-                spectrum = new SpectrumTile(full.columns(), full.rows(), full.dbfs(), ridges);
-                measured.put(key, spectrum);
+            var keys = group.stream().map(ImageKey::tile).distinct().toList();
+            measure(keys);
+            var spectra = new ArrayList<SpectrumTile>(group.size());
+            var pixels = new ArrayList<int[]>(group.size());
+            for (var imageKey : group) {
+                var data = measured.get(imageKey.tile());
+                spectra.add(data);
+                pixels.add(data == null ? null : colors(data, imageKey));
             }
-            var data = spectrum;
-            int[] pixels = colors(data, imageKey.contrast());
             Platform.runLater(() -> {
                 if (closed) return;
-                displayed.put(imageKey, new Tile(image(data, pixels), data.ridges()));
-                pending.remove(imageKey);
+                for (var key : keys) pending.remove(key, measurement);
+                for (int i = 0; i < group.size(); i++)
+                    if (spectra.get(i) != null) show(group.get(i), spectra.get(i), pixels.get(i));
                 repaint.run();
             });
         } catch (Exception failure) {
             Platform.runLater(() -> {
                 if (closed) return;
-                failures.add(imageKey);
-                if (pending.remove(imageKey) != null)
-                    error.accept("Spectrogram unavailable · " + failure.getMessage());
+                boolean shown = false;
+                for (var key : group.stream().map(ImageKey::tile).distinct().toList()) {
+                    if (pending.remove(key, measurement)) {
+                        failures.add(key);
+                        shown = true;
+                    }
+                }
+                if (shown) error.accept("Spectrogram unavailable · " + failure.getMessage());
             });
+        }
+    }
+
+    /** Measures the octave blocks of one time slice in a single pass over its audio. */
+    private void measure(List<Key> group) throws Exception {
+        var missing = group.stream().filter(key -> !measured.containsKey(key)).toList();
+        if (missing.isEmpty()) return;
+        var first = missing.getFirst();
+        var full = model.spectrum(first.source(), first.start(), first.end(), WIDTH,
+                missing.stream().map(key -> new PitchRange(key.low(), key.high())).toList(),
+                first.rows(), first.reassigned());
+        for (int i = 0; i < missing.size(); i++) {
+            var key = missing.get(i);
+            var tile = full.get(i);
+            // The edge rows have only one neighbour, so their peaks are not ridges.
+            var ridges = tile.ridges().stream()
+                    .filter(ridge -> ridge.pitch() >= key.low() && ridge.pitch() <= key.high()).toList();
+            var spectrum = new SpectrumTile(tile.columns(), tile.rows(), tile.dbfs(), ridges);
+            histograms.put(key, histogram(spectrum.dbfs()));
+            measured.put(key, spectrum);
         }
     }
 
     @Override public void close() {
         closed = true;
         workers.shutdownNow();
+        painters.shutdownNow();
+        colouring.clear();
         pending.clear();
     }
 }

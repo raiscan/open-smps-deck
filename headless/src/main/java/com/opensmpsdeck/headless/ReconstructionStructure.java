@@ -34,7 +34,14 @@ final class ReconstructionStructure {
                   @ReconstructionStages.Nullable List<ReconstructionPhrases.Group> phrases,
                   @ReconstructionStages.Nullable Layout roleLayout,
                   @ReconstructionStages.Nullable ReconstructionTimeMap.TimeBase timeBase,
-                  @ReconstructionStages.Nullable Map<String, String> scoreNoteHashes) {
+                  @ReconstructionStages.Nullable Map<String, String> scoreNoteHashes,
+                  @ReconstructionStages.Nullable Map<String, ReconstructionRepeatConsensus.Member> repeatNotes) {
+        Result(int version, List<Bar> bars, List<Section> sections, List<Repeat> repeats,
+               List<Correction> corrections, List<Note> notes, List<ReconstructionPhrases.Group> phrases,
+               Layout roleLayout, ReconstructionTimeMap.TimeBase timeBase, Map<String, String> scoreNoteHashes) {
+            this(version, bars, sections, repeats, corrections, notes, phrases, roleLayout, timeBase, scoreNoteHashes, null);
+        }
+
         Result(int version, List<Bar> bars, List<Section> sections, List<Repeat> repeats,
                List<Correction> corrections, List<Note> notes) {
             this(version, bars, sections, repeats, corrections, notes, null, null, null, null);
@@ -86,6 +93,13 @@ final class ReconstructionStructure {
     static Result analyze(List<Bar> bars, List<Note> score, List<MidiScore.Part> parts,
                           ReconstructionRhythmAudio audio, boolean inferred, int meter, List<Bar> midiBars,
                           ReconstructionTimeMap timeline, Set<String> authoredIds, List<Note> suppressed) {
+        return analyze(bars, score, parts, audio, inferred, meter, midiBars, timeline, authoredIds, suppressed, Set.of());
+    }
+
+    static Result analyze(List<Bar> bars, List<Note> score, List<MidiScore.Part> parts,
+                          ReconstructionRhythmAudio audio, boolean inferred, int meter, List<Bar> midiBars,
+                          ReconstructionTimeMap timeline, Set<String> authoredIds, List<Note> suppressed,
+                          Set<Integer> stemFillParts) {
         var drums = new HashSet<Integer>();
         for (var part : parts) if (part.drums()) drums.add(part.id());
         var originals = score.stream().filter(note -> !note.source().equals("external")).toList();
@@ -103,7 +117,7 @@ final class ReconstructionStructure {
             if (group.size() < 2) continue;
             String id = "repeat-" + group.getFirst().bar.id;
             repeats.add(new Repeat(id, group.stream().map(pattern -> pattern.bar.id).toList()));
-            consensus(group, candidates, corrected, corrections, bars.getLast().end(), authoredIds, suppressed);
+            consensus(group, candidates, corrected, corrections, bars.getLast().end(), authoredIds, suppressed, stemFillParts);
         }
         var sections = sections(patterns, midiBars == null ? repeats : List.of());
         var roleLayout = midiBars == null ? null : new Layout(midiBars, sections(rolePatterns, repeats), repeats);
@@ -118,7 +132,7 @@ final class ReconstructionStructure {
                 prepared, programs);
         var phrases = ReconstructionPhrases.find(bars, byBar, melody.lead(), audio, meter,
                 timeline == null ? DoubleUnaryOperator.identity() : timeline::source);
-        phraseConsensus(phrases, candidates, corrected, corrections, bars.getLast().end(), suppressed);
+        phraseConsensus(phrases, candidates, corrected, corrections, bars.getLast().end(), suppressed, stemFillParts);
         var notes = corrected.values().stream().sorted(ReconstructionStages.NOTE_ORDER).toList();
         var linked = inferred ? identicalBars(bars, notes, phrases, timeline) : repeats;
         return new Result(VERSION, bars, sections, linked, corrections, notes,
@@ -197,11 +211,12 @@ final class ReconstructionStructure {
 
     private static void consensus(List<Pattern> group, List<Note> candidates, Map<String, Note> corrected,
                                   List<Correction> changes, double scoreEnd,
-                                  Set<String> authoredIds, List<Note> suppressed) {
+                                  Set<String> authoredIds, List<Note> suppressed, Set<Integer> stemFillParts) {
         if (group.size() < 3) return;
         var slots = new ArrayList<Slot>();
         for (var pattern : group) {
             for (var note : pattern.notes) {
+                if (stemFillParts.contains(note.part())) continue;
                 var attack = new Attack(pattern, note);
                 var slot = slots.stream().filter(s -> s.first.part() == note.part()
                                 && s.first.pitch() == note.pitch() && !s.attacks.containsKey(pattern.bar.id)
@@ -272,7 +287,8 @@ final class ReconstructionStructure {
     }
 
     private static void phraseConsensus(List<ReconstructionPhrases.Match> phrases, List<Note> candidates,
-                                        Map<String, Note> corrected, List<Correction> changes, double scoreEnd, List<Note> suppressed) {
+                                        Map<String, Note> corrected, List<Correction> changes, double scoreEnd,
+                                        List<Note> suppressed, Set<Integer> stemFillParts) {
         for (var phrase : phrases) {
             var windows = phrase.windows();
             if (windows.size() < 3) continue;
@@ -293,6 +309,7 @@ final class ReconstructionStructure {
                     entry.setValue(entry.getValue().stream().filter(note -> !used.contains(note.id())).toList());
                 }
                 for (var anchor : anchors) {
+                    if (stemFillParts.contains(anchor.part())) continue;
                     var voters = slots.get(anchor.id());
                     if (voters.size() < 2) continue;
                     for (var target : windows) {
