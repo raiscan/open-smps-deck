@@ -72,7 +72,8 @@ final class VoiceNoteDecode {
     VoiceNoteDecode(InstrumentCatalogue catalogue, TargetGame target) {
         this.catalogue = catalogue;
         this.target = target;
-        voices = VoicePatchShortlist.stockVoices(catalogue, target);
+        // Without a catalogue it only reads audio.
+        voices = catalogue == null ? List.of() : VoicePatchShortlist.stockVoices(catalogue, target);
     }
 
     /**
@@ -126,7 +127,7 @@ final class VoiceNoteDecode {
     }
 
     /** The whole stem at the template rate, resampled the way the templates are. */
-    private static float[] read(Path stem) throws IOException {
+    static float[] read(Path stem) throws IOException {
         double seconds = ReferenceAudio.durationMicros(stem) / 1e6;
         var mono = new float[(int) (seconds * RATE)];
         for (int at = 0; at < mono.length; at += 2 * RATE) {
@@ -251,16 +252,73 @@ final class VoiceNoteDecode {
         var key = new Key(variant.assetId(), pitch, target);
         var cached = TEMPLATES.get(key);
         if (cached != null) return cached;
-        if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("voice decode cancelled");
-        var rendered = VoiceWindows.renderMono(
-                CataloguePlayback.matchProbe(catalogue, variant.id(), pitch, TEMPLATE_TICKS, true, target), TEMPLATE_TICKS);
-        // The driver keys the note on a little after the first sample.
-        int onset = 0;
-        while (onset < 2 * VoiceSpectra.SAMPLES_PER_TICK && Math.abs(rendered[onset]) < 1e-3) onset++;
-        if (onset == 2 * VoiceSpectra.SAMPLES_PER_TICK) onset = 0;
+        var rendered = rendered(variant, pitch);
+        int onset = onset(rendered);
         var result = features(rendered, onset, Math.min(MAX_FRAMES, (rendered.length - onset - FFT) / HOP + 1));
         if (TEMPLATES.size() < CACHE_LIMIT) TEMPLATES.putIfAbsent(key, result);
         return result;
+    }
+
+    private float[] rendered(InstrumentCatalogue.Variant variant, int pitch) throws IOException {
+        if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("voice decode cancelled");
+        return VoiceWindows.renderMono(
+                CataloguePlayback.matchProbe(catalogue, variant.id(), pitch, TEMPLATE_TICKS, true, target), TEMPLATE_TICKS);
+    }
+
+    /** The driver keys the note on a little after the first sample. */
+    private static int onset(float[] rendered) {
+        int onset = 0;
+        while (onset < 2 * VoiceSpectra.SAMPLES_PER_TICK && Math.abs(rendered[onset]) < 1e-3) onset++;
+        return onset == 2 * VoiceSpectra.SAMPLES_PER_TICK ? 0 : onset;
+    }
+
+    /** How many 8 ms frames of a note the decode reads, or 0 when it falls outside the audio. */
+    static int frames(Note note, int samples) {
+        int start = (int) Math.round(note.start() * RATE);
+        int length = (int) Math.round(Math.min(note.end() - note.start(), MAX_SECONDS) * RATE);
+        if (length <= 0 || start < 0 || start + FFT > samples) return 0;
+        return Math.min(Math.min(Math.max(1, (length - FFT) / HOP + 1), (samples - start - FFT) / HOP + 1), MAX_FRAMES);
+    }
+
+    /** Linear magnitude spectra, one row per 8 ms hop. The decode itself reads mel bands. */
+    float[][] magnitudes(float[] mono, int start, int frames) {
+        var result = new float[frames][FFT / 2 + 1];
+        for (int frame = 0; frame < frames; frame++) {
+            fft.transform(mono, start + frame * HOP, HANN);
+            for (int bin = 0; bin <= FFT / 2; bin++) result[frame][bin] = (float) Math.sqrt(fft.power(bin));
+        }
+        return result;
+    }
+
+    /** Linear magnitudes of a stock patch at a pitch and full track volume. Not cached. */
+    float[][] magnitudeTemplate(InstrumentCatalogue.Variant variant, int pitch) throws IOException {
+        var rendered = rendered(variant, pitch);
+        int onset = onset(rendered);
+        return magnitudes(rendered, onset, Math.min(MAX_FRAMES, (rendered.length - onset - FFT) / HOP + 1));
+    }
+
+    /** The decode's mel bands from linear magnitudes. */
+    static float[][] mel(float[][] magnitudes) {
+        var result = new float[magnitudes.length][BANDS];
+        for (int frame = 0; frame < magnitudes.length; frame++)
+            for (int band = 0; band < BANDS; band++) {
+                double sum = 0;
+                for (int bin = 0; bin <= FFT / 2; bin++) sum += MEL[band][bin] * magnitudes[frame][bin];
+                result[frame][band] = (float) Math.sqrt(sum);
+            }
+        return result;
+    }
+
+    /** Spectrum bins within {@code width} bins of a harmonic of the pitch. {@code division} 2 also takes the half harmonics. */
+    static float[] comb(int pitch, int division, double width) {
+        double fundamental = 440 * Math.pow(2, (pitch - 69) / 12.0) / division, binHz = RATE / (double) FFT;
+        var mask = new float[FFT / 2 + 1];
+        for (int bin = 0; bin < mask.length; bin++) {
+            double hz = bin * binHz, ratio = hz / fundamental;
+            if (hz >= fundamental - width * binHz && Math.abs(ratio - Math.round(ratio)) * fundamental / binHz <= width)
+                mask[bin] = 1;
+        }
+        return mask;
     }
 
     /** Square-root mel magnitudes, 48 bands from 40 Hz to Nyquist, one row per 8 ms hop. */

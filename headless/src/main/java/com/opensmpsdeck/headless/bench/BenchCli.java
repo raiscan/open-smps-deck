@@ -40,11 +40,12 @@ public final class BenchCli {
     private BenchCli() {}
 
     public static void usage(PrintStream out) {
+        out.println("       bench voice-retrieval TRUTH.json WORK_DIR");
         out.println("       bench build-corpus ROM INDEX.json OUT_DIR [--songs IDS | --quick] [--seconds N] [--stems] [--profile suno-like [--drift N]]");
         out.println("           --ladder [--game s1|s2|s3k] [--effects room|lofi] [--full-length [--loops N]]");
         out.println("           [--torture] [--transcriber NAME [--transcriber-config FILE] [--transcriber-device DEVICE]]");
         out.println("           [--separator NAME [--separator-config FILE] [--separator-device DEVICE]]");
-        out.println("       bench run MANIFEST.json INDEX.json OUT_DIR [--target s1|s2|s3k] [--quick] [--holdout] [--audio-refine] [--jobs N] [--keep-work]");
+        out.println("       bench run MANIFEST.json INDEX.json OUT_DIR [--target s1|s2|s3k] [--quick] [--holdout] [--audio-refine] [--jobs N] [--keep-work] [--voice-retrieval]");
         out.println("           [--gold GOLD.json [--gold-only]] [--role-plan oracle|oracle-section] [--steady-tempo off|auto]");
         out.println("       bench live-edit WORK_DIR JOURNAL.json [--target s1|s2|s3k] [--at SECONDS] [--samples N]");
         out.println("       bench lead-gap WORK_DIR (--stem LEAD.wav | --gold GOLD.json)");
@@ -57,10 +58,11 @@ public final class BenchCli {
             usage(out);
             return 0;
         }
-        if (args.length < 2) throw new IllegalArgumentException("Expected bench build-corpus, run, live-edit, lead-gap, compare or ladder-report");
+        if (args.length < 2) throw new IllegalArgumentException("Expected bench build-corpus, run, voice-retrieval, live-edit, lead-gap, compare or ladder-report");
         return switch (args[1]) {
             case "build-corpus" -> build(args, out, hooks);
             case "run" -> runCases(args, out, hooks);
+            case "voice-retrieval" -> voiceRetrieval(args, out);
             case "live-edit" -> LiveEditBenchmark.run(args, out);
             case "lead-gap" -> leadGap(args, out, hooks);
             case "compare" -> compare(args, out);
@@ -192,7 +194,7 @@ public final class BenchCli {
         for (int i = 5; i < args.length; i++) {
             String flag = unique(seen, args[i]);
             switch (flag) {
-                case "--quick", "--holdout", "--audio-refine", "--gold-only", "--keep-work" -> { }
+                case "--quick", "--holdout", "--audio-refine", "--gold-only", "--keep-work", "--voice-retrieval" -> { }
                 case "--target" -> target = TargetGame.parse(value(args, ++i, flag));
                 case "--steady-tempo" -> {
                     steadyTempo = value(args, ++i, flag);
@@ -221,7 +223,25 @@ public final class BenchCli {
         return BenchRun.run(Path.of(args[2]), Path.of(args[3]), Path.of(args[4]),
                 new BenchRun.Options(seen.contains("--quick"), seen.contains("--holdout"),
                         seen.contains("--audio-refine"), jobs, gold, seen.contains("--gold-only"), rolePlan, steadyTempo, target,
-                        seen.contains("--keep-work")), out, hooks);
+                        seen.contains("--keep-work"), seen.contains("--voice-retrieval")), out, hooks);
+    }
+
+    /** Scores the per-note decode on a kept reconstruction, so the transcription is held fixed. Report only. */
+    private static int voiceRetrieval(String[] args, PrintStream out) throws IOException {
+        if (args.length != 4)
+            throw new IllegalArgumentException("bench voice-retrieval expects TRUTH.json WORK_DIR");
+        var truth = new java.util.ArrayList<com.opensmpsdeck.headless.VoiceRetrieval.Truth>();
+        for (var channel : BenchFiles.read(Path.of(args[2]), BenchTimeline.Truth.class).channels()) {
+            boolean fm = channel.kind().startsWith("FM"), psg = channel.kind().startsWith("PSG");
+            if (!fm && !psg) continue;
+            for (var note : channel.notes()) {
+                if (fm && note.voiceHash() == null) continue;
+                truth.add(new com.opensmpsdeck.headless.VoiceRetrieval.Truth(channel.kind(), note.start(), note.end(),
+                        note.pitch(), fm ? note.voiceHash() : null));
+            }
+        }
+        out.println(new com.google.gson.Gson().toJson(com.opensmpsdeck.headless.VoiceRetrieval.measure(Path.of(args[3]), truth)));
+        return 0;
     }
 
     private static int ladderReport(String[] args, PrintStream out) throws IOException {

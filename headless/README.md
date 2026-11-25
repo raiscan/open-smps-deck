@@ -1520,6 +1520,10 @@ saves reviewable `noteVoicing` proposals, and `--apply` also applies the
 passages that pass every guard and rebuilds. See
 [patch changes within a part](../docs/architecture/reconstruction-stages.md#patch-changes-within-a-part).
 
+Run `reconstruct voice-regime WORK_DIR` for two tentative diagnostics of
+each part's stem. See
+[stem diagnostics](../docs/architecture/reconstruction-stages.md#stem-diagnostics).
+
 ## Reconstruction benchmark
 
 Use `bench build-corpus` with a local locked-on ROM and catalogue, then
