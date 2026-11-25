@@ -22,10 +22,25 @@ final class VoicePatchShortlist {
     private static final int ATTACK_TICKS = 7;
     private static final int PROBE_LIMIT = 5;
     private static final int SHORTLIST_LIMIT = 18;
+    private static final int TYPICAL_LIMIT = 9;
+    private static final int TYPICAL_CHOICE = 8;
     private static final int CACHE_LIMIT = 24_000;
+    private static final double VOLUME_STEP_DB = .75;
+    // Compare in 3 dB steps down to -36 dB so equal-level probes share templates.
+    private static final int LEVEL_STEPS = 4;
+    private static final int MAX_LEVEL_STEPS = 12;
+    private static final int PAIRED_ATTACKS = 24;
+    private static final double PAIRED_BLOCK_SECONDS = 4;
+    private static final int PAIRED_BLOCKS = 3;
+    private static final int PAIRED_LEVELS = 3;
+    // The challenger must be closer in most blocks, and by this much attack loss on average.
+    private static final double PAIRED_MARGIN = .01;
+    private static final int FLOOR_SAMPLES = VoiceSpectra.RATE / 50;
+    // The key-on must rise 6 dB over the 20 ms before it for its level to be its own.
+    private static final double CLEAR_ONSET_RATIO = 2;
 
     record RankedPatch(String id, double score) {}
-    private record Key(String asset, int pitch, TargetGame target) {}
+    private record Key(String asset, int pitch, TargetGame target, int volume) {}
     private record Audibility(double peak, double tailRms) {}
     private record LowProbe(int pitch, LowRegisterSpectrum.Profile profile) {}
     private record Probe(int pitch, float[] target, float[] weights, double exposure) {}
@@ -37,6 +52,7 @@ final class VoicePatchShortlist {
     private final TargetGame target;
     private final List<InstrumentCatalogue.Variant> variants;
     private final Map<Key, Audibility> audibility = new java.util.HashMap<>();
+    private final Map<Key, VoiceSpectralBalance.Profile> balances = new java.util.HashMap<>();
     private final VoiceSpectra spectra = new VoiceSpectra();
     private final LowRegisterSpectrum lowSpectrum = new LowRegisterSpectrum();
     private final VoiceAttackShape attackShape = new VoiceAttackShape();
@@ -97,10 +113,24 @@ final class VoicePatchShortlist {
         return 2 * (re * re + im * im) / (length * length);
     }
 
-    List<RankedPatch> rank(List<ReconstructionAllocation.Entry> notes, List<ReconstructionAllocation.Entry> context,
-                           Path mix, Map<Integer, Path> stems, VoiceWindows windows,
-                           InstrumentCatalogue.Variant incumbent, boolean foreground, StockVoicePrior prior,
-                           ReconstructionHeldNotes.StockScreen sustain) throws IOException {
+    /**
+     * Candidates for one part. {@code clearest} is the shortlist from the
+     * clearest attacks, at most {@value #SHORTLIST_LIMIT} entries including
+     * the incumbent. {@code typical} holds up to {@value #TYPICAL_LIMIT} more
+     * patches that best explain an attack from each stretch of the part.
+     * They are challengers: scores are on the clearest attacks, so they
+     * cannot change whether those attacks support the part.
+     */
+    record Ranking(List<RankedPatch> clearest, List<RankedPatch> typical) {
+        double clearestMatch() {
+            return clearest.stream().mapToDouble(RankedPatch::score).max().orElse(0);
+        }
+    }
+
+    Ranking rank(List<ReconstructionAllocation.Entry> notes, List<ReconstructionAllocation.Entry> context,
+                 Path mix, Map<Integer, Path> stems, VoiceWindows windows,
+                 InstrumentCatalogue.Variant incumbent, boolean foreground, StockVoicePrior prior,
+                 ReconstructionHeldNotes.StockScreen sustain, boolean challengers) throws IOException {
         var available = new ArrayList<>(notes.stream().filter(n -> windows.trainingAttack(n.startTick(), ATTACK_TICKS)).toList());
         var occupied = new java.util.HashMap<String, int[]>();
         available.sort(Comparator.comparingInt((ReconstructionAllocation.Entry note) -> {
@@ -111,23 +141,13 @@ final class VoicePatchShortlist {
         }).thenComparing(Comparator.comparingInt((ReconstructionAllocation.Entry n) ->
                 Math.min(foreground ? 18 : ATTACK_TICKS, n.endTick() - n.startTick())).reversed())
                 .thenComparingInt(n -> foreground ? -n.note().velocity() : 0));
+        var measured = new java.util.IdentityHashMap<ReconstructionAllocation.Entry, java.util.Optional<Probe>>();
+        var durations = new java.util.HashMap<Path, Long>();
         var chosen = new ArrayList<ReconstructionAllocation.Entry>();
         var probes = new ArrayList<Probe>();
-        var durations = new java.util.HashMap<Path, Long>();
         for (var note : available) {
-            if (chosen.stream().anyMatch(n -> Math.abs(n.startTick() - note.startTick()) < 25)) continue;
-            if (chosen.stream().filter(n -> n.note().pitch() == note.note().pitch()).count() >= 2) continue;
-            Path path = stems.getOrDefault(note.note().part(), mix);
-            Long end = durations.get(path);
-            if (end == null) {
-                end = ReferenceAudio.durationMicros(path);
-                durations.put(path, end);
-            }
-            var probe = probe(path, end, note, foreground);
-            if (probe == null) continue;
-            chosen.add(note);
-            probes.add(probe);
             if (probes.size() == PROBE_LIMIT) break;
+            addProbe(note, chosen, probes, measured, durations, mix, stems, foreground);
         }
         var ranked = new ArrayList<RankedPatch>();
         var availableVariants = probes.isEmpty() && prior == null && sustain == null
@@ -143,7 +163,80 @@ final class VoicePatchShortlist {
             if (shortlist.size() == SHORTLIST_LIMIT) shortlist.removeLast();
             shortlist.add(rank(incumbent, probes));
         }
-        return List.copyOf(shortlist);
+        if (!challengers || probes.isEmpty()) return new Ranking(List.copyOf(shortlist), List.of());
+        // The clearest attacks favour long notes and can all come from one
+        // passage. One attack from each stretch of the part can name patches
+        // they miss.
+        var parts = stretches(available, PROBE_LIMIT);
+        // Nothing to add when the clearest attacks already come from nearly every stretch.
+        if (parts.stream().filter(stretch -> stretch.stream().anyMatch(chosen::contains)).count() >= PROBE_LIMIT - 1)
+            return new Ranking(List.copyOf(shortlist), List.of());
+        var typical = new ArrayList<ReconstructionAllocation.Entry>();
+        var typicalProbes = new ArrayList<Probe>();
+        var rendered = new HashSet<Integer>();
+        for (var note : chosen) rendered.add(probePitch(note));
+        for (var stretch : parts) {
+            // Among a stretch's best attacks, one at a pitch already rendered costs no new renders.
+            var reuse = stretch.stream().limit(TYPICAL_CHOICE).filter(note -> rendered.contains(probePitch(note))).findFirst();
+            if (reuse.isPresent() && addProbe(reuse.get(), typical, typicalProbes, measured, durations, mix, stems, foreground))
+                continue;
+            for (var note : stretch) {
+                if (!addProbe(note, typical, typicalProbes, measured, durations, mix, stems, foreground)) continue;
+                rendered.add(probePitch(note));
+                break;
+            }
+        }
+        if (typicalProbes.isEmpty() || new HashSet<>(chosen).containsAll(typical))
+            return new Ranking(List.copyOf(shortlist), List.of());
+        var spread = new ArrayList<RankedPatch>();
+        for (var variant : variants) spread.add(rank(variant, typicalProbes));
+        var onClearest = new java.util.HashMap<String, RankedPatch>();
+        for (var patch : ranked) onClearest.put(patch.id(), patch);
+        var admitted = new ArrayList<RankedPatch>();
+        for (var patch : shortlist(spread, prior, TYPICAL_LIMIT, sustain))
+            if (shortlist.stream().noneMatch(kept -> kept.id().equals(patch.id()))) admitted.add(onClearest.get(patch.id()));
+        return new Ranking(List.copyOf(shortlist), List.copyOf(admitted));
+    }
+
+    /** Splits quality-ordered notes into equal runs of the timeline, each kept in quality order. */
+    static <T extends ReconstructionAllocation.Entry> List<List<T>> stretches(List<T> ordered, int count) {
+        var byTime = ordered.stream().sorted(Comparator.comparingInt(ReconstructionAllocation.Entry::startTick)).toList();
+        var rank = new java.util.IdentityHashMap<T, Integer>();
+        for (int i = 0; i < ordered.size(); i++) rank.put(ordered.get(i), i);
+        var result = new ArrayList<List<T>>();
+        for (int i = 0; i < count; i++) {
+            var stretch = new ArrayList<>(byTime.subList(i * byTime.size() / count, (i + 1) * byTime.size() / count));
+            stretch.sort(Comparator.comparingInt(rank::get));
+            if (!stretch.isEmpty()) result.add(stretch);
+        }
+        return result;
+    }
+
+    private int probePitch(ReconstructionAllocation.Entry note) {
+        return Math.min(note.note().pitch(), TargetProfile.of(target).fm().high());
+    }
+
+    private boolean addProbe(ReconstructionAllocation.Entry note, List<ReconstructionAllocation.Entry> chosen,
+                             List<Probe> probes, Map<ReconstructionAllocation.Entry, java.util.Optional<Probe>> measured,
+                             Map<Path, Long> durations, Path mix, Map<Integer, Path> stems,
+                             boolean foreground) throws IOException {
+        if (chosen.stream().anyMatch(n -> Math.abs(n.startTick() - note.startTick()) < 25)) return false;
+        if (chosen.stream().filter(n -> n.note().pitch() == note.note().pitch()).count() >= 2) return false;
+        var probe = measured.get(note);
+        if (probe == null) {
+            Path path = stems.getOrDefault(note.note().part(), mix);
+            Long end = durations.get(path);
+            if (end == null) {
+                end = ReferenceAudio.durationMicros(path);
+                durations.put(path, end);
+            }
+            probe = java.util.Optional.ofNullable(probe(path, end, note, foreground));
+            measured.put(note, probe);
+        }
+        if (probe.isEmpty()) return false;
+        chosen.add(note);
+        probes.add(probe.get());
+        return true;
     }
 
     /**
@@ -155,24 +248,7 @@ final class VoicePatchShortlist {
                                     Path stem, VoiceWindows windows, boolean guitar) throws IOException {
         if (candidates.size() < 2 || stem == null) return candidates;
         double duration = VoiceAttackShape.SAMPLES / (double) VoiceSpectra.RATE;
-        double audioEnd = ReferenceAudio.durationMicros(stem) / 1e6;
-        var ordered = part.stream().sorted(Comparator.comparingDouble(n -> n.note().start())).toList();
-        var exposed = new ArrayList<ReconstructionAllocation.Entry>();
-        double previousEnd = 0;
-        for (int i = 0; i < ordered.size(); i++) {
-            var entry = ordered.get(i);
-            var note = entry.note();
-            double nextStart = i + 1 < ordered.size() ? ordered.get(i + 1).note().start()
-                    : Double.POSITIVE_INFINITY;
-            // Reject chords and continuing notes on the same stem. A small
-            // boundary tolerance permits adjacent gates with score rounding.
-            if (previousEnd <= note.start() + .005 && nextStart >= note.start() + duration
-                    && note.run() == null && entry.lane().startsWith("FM")
-                    && entry.endTick() - entry.startTick() >= 3
-                    && note.end() - note.start() >= duration && note.start() + duration <= audioEnd
-                    && windows.trainingAttack(entry.startTick(), 3)) exposed.add(entry);
-            previousEnd = Math.max(previousEnd, note.end());
-        }
+        var exposed = exposedAttacks(part, stem, windows);
         var probes = new ArrayList<AttackProbe>();
         var pitches = new java.util.HashMap<Integer, Integer>();
         // Interleave the timeline so a fast run cannot supply all examples.
@@ -197,19 +273,7 @@ final class VoicePatchShortlist {
         for (int i = 0; i < candidates.size(); i++) {
             if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("attack fitting cancelled");
             var variant = catalogue.match(candidates.get(i).id(), target).variant();
-            var profiles = new java.util.HashMap<Integer, VoiceSpectralBalance.Profile>();
-            for (var probe : probes) {
-                double loss = probe.shape().distance(template(variant, probe.pitch()).attack());
-                if (probe.spectrum() != null) {
-                    var stock = profiles.get(probe.pitch());
-                    if (stock == null) {
-                        stock = spectralProbe(variant, probe.pitch());
-                        profiles.put(probe.pitch(), stock);
-                    }
-                    loss += .012 * probe.spectrum().distance(stock) + .025 * probe.spectrum().excess(stock);
-                }
-                losses[i] += loss / probes.size();
-            }
+            for (var probe : probes) losses[i] += attackLoss(variant, probe, 127) / probes.size();
             best = Math.min(best, losses[i]);
         }
         // Leave the contextual fit a choice when attacks differ only slightly.
@@ -219,15 +283,182 @@ final class VoicePatchShortlist {
         return List.copyOf(result);
     }
 
-    private VoiceSpectralBalance.Profile spectralProbe(InstrumentCatalogue.Variant variant, int pitch) throws IOException {
-        var project = CataloguePlayback.matchProbe(catalogue, variant.id(), pitch, 3, true, target);
+    /** Key-ons with no other note of the part sounding on the stem, in time order. */
+    private List<ReconstructionAllocation.Entry> exposedAttacks(List<ReconstructionAllocation.Entry> part,
+                                                                Path stem, VoiceWindows windows) throws IOException {
+        double duration = VoiceAttackShape.SAMPLES / (double) VoiceSpectra.RATE;
+        double audioEnd = ReferenceAudio.durationMicros(stem) / 1e6;
+        var ordered = part.stream().sorted(Comparator.comparingDouble(n -> n.note().start())).toList();
+        var exposed = new ArrayList<ReconstructionAllocation.Entry>();
+        double previousEnd = 0;
+        for (int i = 0; i < ordered.size(); i++) {
+            var entry = ordered.get(i);
+            var note = entry.note();
+            double nextStart = i + 1 < ordered.size() ? ordered.get(i + 1).note().start()
+                    : Double.POSITIVE_INFINITY;
+            // Reject chords and continuing notes on the same stem. A small
+            // boundary tolerance permits adjacent gates with score rounding.
+            if (previousEnd <= note.start() + .005 && nextStart >= note.start() + duration
+                    && note.run() == null && entry.lane().startsWith("FM")
+                    && entry.endTick() - entry.startTick() >= 3
+                    && note.end() - note.start() >= duration && note.start() + duration <= audioEnd
+                    && windows.trainingAttack(entry.startTick(), 3)) exposed.add(entry);
+            previousEnd = Math.max(previousEnd, note.end());
+        }
+        return exposed;
+    }
+
+    private double attackLoss(InstrumentCatalogue.Variant variant, AttackProbe probe, int volume) throws IOException {
+        double loss = probe.shape().distance(template(variant, probe.pitch(), volume).attack());
+        if (probe.spectrum() == null) return loss;
+        var stock = spectralProbe(variant, probe.pitch(), volume);
+        return loss + .012 * probe.spectrum().distance(stock) + .025 * probe.spectrum().excess(stock);
+    }
+
+    private record PairedAttack(int block, AttackProbe probe, boolean clearOnset) {}
+
+    /**
+     * The challenger whose attacks match the stem better than the holder's,
+     * or null. Each patch plays at the track volume that reaches the stem's
+     * attack level, because several carriers at full volume clip the channel
+     * and a quiet part then does not match its own patch. That level is an
+     * estimate. The win must also hold one 3 dB step to the other side of the
+     * measurement, and at full volume wherever the onset does not stand
+     * clear of what was already sounding. No evidence keeps the holder.
+     */
+    RankedPatch attackWinner(List<RankedPatch> challengers, RankedPatch holder,
+                             List<ReconstructionAllocation.Entry> part, Path stem, VoiceWindows windows)
+            throws IOException {
+        if (challengers.isEmpty() || stem == null) return null;
+        var exposed = exposedAttacks(part, stem, windows);
+        double lead = FLOOR_SAMPLES / (double) VoiceSpectra.RATE;
+        double duration = VoiceAttackShape.SAMPLES / (double) VoiceSpectra.RATE;
+        var attacks = new ArrayList<PairedAttack>();
+        var range = TargetProfile.of(target).fm();
+        // The part's own previous note explains sound before a legato key-on.
+        var ends = new java.util.TreeMap<Double, Double>();
+        double latest = 0;
+        for (var entry : part.stream().sorted(Comparator.comparingDouble(n -> n.note().start())).toList()) {
+            ends.put(entry.note().start(), latest);
+            latest = Math.max(latest, entry.note().end());
+        }
+        int stride = Math.max(1, exposed.size() / PAIRED_ATTACKS);
+        for (int i = 0; i < exposed.size() && attacks.size() < PAIRED_ATTACKS; i += stride) {
+            var note = exposed.get(i).note();
+            if (note.pitch() < range.low() || note.pitch() > range.high() || note.start() < lead) continue;
+            var audio = ReferenceAudio.read(stem, note.start() - lead, lead + duration);
+            var mono = VoiceSpectra.resample(audio, FLOOR_SAMPLES + VoiceAttackShape.SAMPLES);
+            var shape = attackShape.measure(java.util.Arrays.copyOfRange(mono, FLOOR_SAMPLES, mono.length));
+            if (shape.peak() < .003) continue;
+            int from = (int) Math.round(lead * audio.sampleRate());
+            var spectral = audio.sampleRate() >= 16000 && from + VoiceSpectralBalance.SIZE <= audio.samples().length
+                    ? spectralBalance.measure(audio.samples(), from, audio.sampleRate(), fundamental(note.pitch())) : null;
+            attacks.add(new PairedAttack((int) (note.start() / PAIRED_BLOCK_SECONDS),
+                    new AttackProbe(note.pitch(), shape, spectral),
+                    shape.peak() >= CLEAR_ONSET_RATIO * level(mono, 0, FLOOR_SAMPLES)
+                            || ends.get(note.start()) >= note.start() - lead));
+        }
+        var blocks = new java.util.TreeMap<Integer, List<Integer>>();
+        for (int i = 0; i < attacks.size(); i++)
+            blocks.computeIfAbsent(attacks.get(i).block(), ignored -> new ArrayList<>()).add(i);
+        blocks.values().removeIf(members -> members.size() < 2);
+        if (blocks.size() < PAIRED_BLOCKS) return null;
+
+        var holderVariant = catalogue.match(holder.id(), target).variant();
+        var held = new double[PAIRED_LEVELS][];
+        RankedPatch winner = null;
+        double best = -PAIRED_MARGIN;
+        for (var challenger : challengers) {
+            if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("attack comparison cancelled");
+            var variant = catalogue.match(challenger.id(), target).variant();
+            double worst = Double.NEGATIVE_INFINITY;
+            // Most challengers fail at the estimated level, so the other levels wait for one that does not.
+            for (int level = 0; level < PAIRED_LEVELS && worst < best; level++) {
+                if (held[level] == null) held[level] = pairedLosses(holderVariant, attacks, level);
+                var losses = pairedLosses(variant, attacks, level);
+                double total = 0;
+                int closer = 0;
+                for (var members : blocks.values()) {
+                    double difference = 0;
+                    for (int attack : members) difference += (losses[attack] - held[level][attack]) / members.size();
+                    total += difference / blocks.size();
+                    if (difference < 0) closer++;
+                }
+                // One level that fails to show a win in most blocks settles it.
+                worst = Math.max(worst, 2 * closer > blocks.size() ? total : 0);
+            }
+            if (worst < best) {
+                best = worst;
+                winner = challenger;
+            }
+        }
+        return winner;
+    }
+
+    /**
+     * Attack losses under one level hypothesis: 0 the estimated level, 1 one step
+     * to its other side, 2 full volume wherever the onset is unclear.
+     */
+    private double[] pairedLosses(InstrumentCatalogue.Variant variant, List<PairedAttack> attacks, int level)
+            throws IOException {
+        var losses = new double[attacks.size()];
+        for (int i = 0; i < attacks.size(); i++) {
+            var attack = attacks.get(i);
+            var probe = attack.probe();
+            int volume = attackMatchedVolume(variant, probe.pitch(), probe.shape().peak());
+            if (level == 1) {
+                double peak = template(variant, probe.pitch(), volume).attack().peak();
+                volume = Math.clamp(volume + (probe.shape().peak() > peak ? LEVEL_STEPS : -LEVEL_STEPS),
+                        127 - LEVEL_STEPS * MAX_LEVEL_STEPS, 127);
+            } else if (level == 2 && !attack.clearOnset()) volume = 127;
+            losses[i] = attackLoss(variant, probe, volume);
+        }
+        return losses;
+    }
+
+    private static double level(float[] audio, int from, int to) {
+        double sum = 0, squares = 0;
+        for (int i = from; i < to; i++) {
+            sum += audio[i];
+            squares += audio[i] * (double) audio[i];
+        }
+        double mean = sum / (to - from);
+        return Math.sqrt(Math.max(0, squares / (to - from) - mean * mean));
+    }
+
+    /**
+     * The track volume at which this patch's attack peak reaches the peak
+     * measured on the stem, in 3 dB steps. It estimates the level of one
+     * key-on. It is not the volume the part will finally be written at.
+     */
+    int attackMatchedVolume(InstrumentCatalogue.Variant variant, int pitch, double stemPeak) throws IOException {
+        int volume = 127;
+        // Clipping hides the true level difference, so measure again from the lower volume.
+        for (int pass = 0; pass < 3; pass++) {
+            double peak = template(variant, pitch, volume).attack().peak();
+            if (peak <= 0 || stemPeak <= 0) break;
+            int steps = (int) Math.round(-20 * Math.log10(stemPeak / peak) / VOLUME_STEP_DB / LEVEL_STEPS);
+            int next = Math.clamp(volume - LEVEL_STEPS * steps, 127 - LEVEL_STEPS * MAX_LEVEL_STEPS, 127);
+            if (next == volume) break;
+            volume = next;
+        }
+        return volume;
+    }
+
+    private VoiceSpectralBalance.Profile spectralProbe(InstrumentCatalogue.Variant variant, int pitch, int volume) throws IOException {
+        var key = new Key(variant.assetId(), pitch, target, volume);
+        var cached = balances.get(key);
+        if (cached != null) return cached;
+        var project = CataloguePlayback.leveledProbe(catalogue, variant.id(), pitch, 3, target, volume);
         var mono = new float[3 * S3kRenderer.STEREO_FRAMES_PER_PRESENTATION];
         int[] offset = {0};
         TargetPlayback.prepare(project).render(3, pcm -> {
             for (int i = 0; i < pcm.length; i += 2)
                 mono[offset[0]++] = (pcm[i] + pcm[i + 1]) / 65536f;
         });
-        return spectralBalance.measure(mono, 0, S3kRenderer.SAMPLE_RATE, fundamental(pitch));
+        var profile = spectralBalance.measure(mono, 0, S3kRenderer.SAMPLE_RATE, fundamental(pitch));
+        balances.put(key, profile);
+        return profile;
     }
 
     private static double fundamental(int pitch) {
@@ -304,7 +535,7 @@ final class VoicePatchShortlist {
         var labels = InstrumentCatalogue.labels(catalogue.asset(variant.assetId()));
         if (labels.stream().anyMatch(label -> label.text().equals("Silent Bass")
                 || prior.sustained && label.text().equals("Wood Block"))) return false;
-        var key = new Key(variant.assetId(), prior.pitch, target);
+        var key = new Key(variant.assetId(), prior.pitch, target, 127);
         var probe = audibility.get(key);
         if (probe == null) {
             if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("patch screening cancelled");
@@ -387,10 +618,14 @@ final class VoicePatchShortlist {
     }
 
     private Template template(InstrumentCatalogue.Variant variant, int pitch) throws IOException {
-        var key = new Key(variant.assetId(), pitch, target);
+        return template(variant, pitch, 127);
+    }
+
+    private Template template(InstrumentCatalogue.Variant variant, int pitch, int volume) throws IOException {
+        var key = new Key(variant.assetId(), pitch, target, volume);
         var cached = TEMPLATES.get(key);
         if (cached != null) return cached;
-        var project = CataloguePlayback.matchProbe(catalogue, variant.id(), pitch, ATTACK_TICKS, true, target);
+        var project = CataloguePlayback.leveledProbe(catalogue, variant.id(), pitch, ATTACK_TICKS, target, volume);
         var rendered = VoiceWindows.renderMono(project, ATTACK_TICKS);
         var features = new Template(spectra.average(rendered),
                 pitch <= LowRegisterSpectrum.MAX_PITCH ? lowSpectrum.profile(rendered, pitch) : null,

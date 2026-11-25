@@ -10,7 +10,7 @@ final class VoiceFit {
     private static final double MAX_GAIN = 4;
     private static final double NEW_PATCH_MARGIN = .0001;
     // A near-tie that flipped the selected voice moved the fit error by about 0.18%.
-    private static final double INCUMBENT_MARGIN = .005;
+    static final double INCUMBENT_MARGIN = .005;
 
     /** A patch spectrum. The preference only settles exact acoustic ties. */
     record Candidate(String id, float[] spectrum, double preference) {
@@ -100,6 +100,48 @@ final class VoiceFit {
         if (best == original) return false;
         replace(lane, best.selection());
         return true;
+    }
+
+    /**
+     * Whether the challenger beats the lane's current selection on the training and
+     * the held-out loss by the margin, with every other lane exactly as it is. It
+     * replaces the selection only then, and moves nothing else.
+     */
+    boolean challenge(int lane, Candidate challenger, double relativeMargin) {
+        var held = current();
+        var trial = trial(lane, challenger);
+        if (!improves(held.fit(), trial.fit(), relativeMargin)
+                || !improves(held.check(), trial.check(), relativeMargin)) return false;
+        replace(lane, trial.selection());
+        return true;
+    }
+
+    /** Whether the lane's current selection still beats another candidate by the margin on both losses. */
+    boolean beats(int lane, Candidate other, double relativeMargin) {
+        var now = current();
+        var trial = trial(lane, other);
+        return improves(trial.fit(), now.fit(), relativeMargin)
+                && improves(trial.check(), now.check(), relativeMargin);
+    }
+
+    /**
+     * Rechecks replaced lanes against the selections they displaced, which the map holds
+     * by lane. A lane that no longer beats its old selection by the margin gets that
+     * selection back, gain included, and leaves the map. Sweeps repeat until one restores
+     * nothing, so a survivor is always checked beside the final state of every other lane.
+     */
+    void settle(java.util.Map<Integer, Selection> replaced, double relativeMargin) {
+        if (replaced.size() < 2) return;
+        boolean restored = true;
+        while (restored && !replaced.isEmpty()) {
+            restored = false;
+            for (var entry : List.copyOf(replaced.entrySet())) {
+                if (beats(entry.getKey(), entry.getValue().candidate(), relativeMargin)) continue;
+                replace(entry.getKey(), entry.getValue());
+                replaced.remove(entry.getKey());
+                restored = true;
+            }
+        }
     }
 
     private static boolean tied(double a, double b) {

@@ -1460,7 +1460,28 @@ melody and backing, its line drives the shared patch, gain and articulation.
 Excerpt selection weights sustained, higher-velocity line notes more heavily
 and discounts ticks covered by that source instrument's other notes. The
 attack shortlist also favors exposed, sustained onsets and weighs stronger
-audio probes more heavily. If none of the candidates explains enough of the
+audio probes more heavily. The shortlist holds at most 18 patches, including
+the saved patch on a refit.
+
+An S3K source part with its own stem can also raise challengers. A second
+probe set takes one attack from each fifth of the part's notes in time order,
+so a few long notes cannot stand in for a part made mostly of short ones.
+Its best patches, up to nine, and the patches the attack screen rejected
+become challengers, four from each source at most. They stay out of the
+shortlist, its scores and the choice of fit excerpts.
+
+After the joint fit, the challenger closest to the stem's exposed attacks is
+compared with the selected patch on up to 24 key-ons. Several carriers at
+full volume clip the channel, so each patch plays at the track volume whose
+attack peak reaches the stem's, in 3 dB steps down to 36 dB below full. That
+level is an estimate of one key-on, not the written volume. The challenger
+must be closer in most 4-second blocks and by 0.01 on average, at the
+estimate, one step to its other side, and at full volume wherever the onset
+does not rise 6 dB over the 20 ms before it or follow the part's own
+previous note. With fewer than three such blocks the selected patch stays.
+A winner then joins the joint fit and replaces the selection only if it
+improves both the training and the held-out loss by 0.5%, the margin a
+saved patch has on a refit. If none of the candidates explains enough of the
 line’s attack spectrum, the fit uses the whole part as evidence. The same
 profile plays the backing voices.
 Where stems are supplied, the stem objective compares the fit notes against
