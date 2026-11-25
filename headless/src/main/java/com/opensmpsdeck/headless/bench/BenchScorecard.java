@@ -28,7 +28,7 @@ final class BenchScorecard {
 
     private static final List<String> LOWER = List.of("logMelDistance", "releaseEnergy", "voiceSpectralDistance", "leadGap");
     private static final List<String> HEADLINES = List.of("noteF1", "notePrecision", "noteRecall", "offsetF1",
-            "melodyF1", "leadFidelityF1", "drumF1", DRUM_CLASS, "voiceTop1", "voiceTop3", "voiceSpectralDistance",
+            "melodyF1", "leadFidelityF1", "drumF1", DRUM_CLASS, "voiceTop1", "voiceTop3", "voiceAlgorithm", "voiceSpectralDistance",
             "voiceSpectralCoverage", "logMelDistance", "onsetCorrelation", "releaseEnergy",
             "leadAttackF1", "leadPitchAccuracy", "leadGap");
 

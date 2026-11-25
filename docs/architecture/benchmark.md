@@ -125,6 +125,15 @@ align output events and audio to truth seconds. Classic ladder runs also
 report exact and shortlist FM voice scores in editable operator order
 when holdout mode is off, alongside the spectral scores.
 
+Every ladder run reports `voiceTop1`, the share of matched FM notes whose
+emitted patch has the native patch's hash, and `voiceAlgorithm`, the share
+whose emitted patch uses the same FM operator algorithm. A wrong algorithm
+is a structurally different instrument. A right algorithm with the wrong
+hash is usually a near relative. The share is over the notes where both
+patches' bytes are known, and `voiceAlgorithmCoverage` gives that share of
+the matched notes. Corpus runs report `voiceAlgorithm` when
+holdout mode is off.
+
 Build the classic quick corpora from user-supplied REV01 ROMs. Set `bench`
 to a private output directory, and `s1_rom` and `s2_rom` to the ROM paths.
 `rom set` registers the path in RomLibrary for the stock DAC kit.

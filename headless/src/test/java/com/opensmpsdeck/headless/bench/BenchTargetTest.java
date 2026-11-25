@@ -76,6 +76,7 @@ class BenchTargetTest {
         assertEquals(target, card.targetGame());
         assertEquals(1.0, card.overall().mean().get("noteF1"));
         assertEquals(1.0, card.overall().mean().get("voiceTop1"));
+        assertEquals(1.0, card.overall().mean().get("voiceAlgorithm"));
         assertEquals(1.0, card.overall().mean().get("voiceTop3"));
         assertTrue(card.overall().mean().get("onsetCorrelation") > .8);
     }

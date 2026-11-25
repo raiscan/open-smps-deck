@@ -242,6 +242,7 @@ class BenchCliTest {
         assertEquals(.5, card.overall().mean().get("offsetF1WithLayers"));
         assertEquals(0.0, card.overall().mean().get("melodyF1WithLayers"));
         assertEquals(1.0, card.overall().mean().get("voiceTop1"));
+        assertEquals(1.0, card.overall().mean().get("voiceAlgorithm"));
         assertEquals(1.0, card.overall().mean().get("voiceTop3"));
         assertEquals(-1, Files.mismatch(first.resolve("scorecard.json"), second.resolve("scorecard.json")));
     }

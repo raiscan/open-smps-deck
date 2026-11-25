@@ -330,6 +330,20 @@ public final class ReconstructionReview {
         return build.source;
     }
 
+    /** Inspects a staged rebuild before any of it is published. Throwing discards the build and writes nothing. */
+    interface StagedCheck {
+        void accept(Path before, Path after) throws IOException;
+    }
+
+    /**
+     * Builds the journal in private copies, lets the check inspect the copies from before
+     * and after, and publishes only if the work directory still matches the expected
+     * revision and the copied files. A stale or refused build leaves the directory untouched.
+     */
+    static JsonObject applyChecked(Path work, Revision expected, JsonArray entries, StagedCheck check) throws IOException {
+        return apply(work, expected, entries, null, null, (done, total, message) -> {}, null, null, null, check);
+    }
+
     private static JsonObject apply(Path work, Revision expected, JsonArray entries, String detachedRevision,
                                     String lanePolicyPreset, ReconstructionStages.Progress progress,
                                     JsonArray built, LiveBuild live) throws IOException {
@@ -339,6 +353,12 @@ public final class ReconstructionReview {
     private static JsonObject apply(Path work, Revision expected, JsonArray entries, String detachedRevision,
                                     String lanePolicyPreset, ReconstructionStages.Progress progress,
                                     JsonArray built, LiveBuild live, ExportBuild export) throws IOException {
+        return apply(work, expected, entries, detachedRevision, lanePolicyPreset, progress, built, live, export, null);
+    }
+
+    private static JsonObject apply(Path work, Revision expected, JsonArray entries, String detachedRevision,
+                                    String lanePolicyPreset, ReconstructionStages.Progress progress,
+                                    JsonArray built, LiveBuild live, ExportBuild export, StagedCheck check) throws IOException {
         requireRevision(work, expected);
         var arrangement = requireAttached(work, detachedRevision != null);
         if (detachedRevision != null && (arrangement == null || !detachedRevision.equals(arrangement.revision())))
@@ -448,6 +468,7 @@ public final class ReconstructionReview {
                     }
                 }
             }
+            if (check != null) check.accept(before, after);
             publish(work, before, after, expected, paths, generated, progress, total);
             return diff;
         } finally {

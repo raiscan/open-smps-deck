@@ -61,9 +61,14 @@ final class VoicePatchShortlist {
     VoicePatchShortlist(InstrumentCatalogue catalogue, TargetGame target) {
         this.catalogue = catalogue;
         this.target = target;
+        variants = stockVoices(catalogue, target);
+    }
+
+    /** One variant of each stock FM patch the target can play, in a stable order. */
+    static List<InstrumentCatalogue.Variant> stockVoices(InstrumentCatalogue catalogue, TargetGame target) {
         var seen = target == TargetGame.S3K
                 ? new HashSet<>(CatalogueMatcher.inferredAzureLakeSlots(catalogue)) : new HashSet<String>();
-        variants = catalogue.variants().stream().sorted(Comparator.comparing(InstrumentCatalogue.Variant::id))
+        return catalogue.variants().stream().sorted(Comparator.comparing(InstrumentCatalogue.Variant::id))
                 .filter(variant -> variant.target() == target)
                 .filter(variant -> catalogue.asset(variant.assetId()).kind() == FM_VOICE && seen.add(variant.assetId()))
                 .toList();
@@ -329,6 +334,13 @@ final class VoicePatchShortlist {
     RankedPatch attackWinner(List<RankedPatch> challengers, RankedPatch holder,
                              List<ReconstructionAllocation.Entry> part, Path stem, VoiceWindows windows)
             throws IOException {
+        return attackWinner(challengers, holder, part, stem, windows, PAIRED_BLOCK_SECONDS);
+    }
+
+    /** The same comparison over shorter blocks, for a passage that is shorter than a part. */
+    RankedPatch attackWinner(List<RankedPatch> challengers, RankedPatch holder,
+                             List<ReconstructionAllocation.Entry> part, Path stem, VoiceWindows windows,
+                             double blockSeconds) throws IOException {
         if (challengers.isEmpty() || stem == null) return null;
         var exposed = exposedAttacks(part, stem, windows);
         double lead = FLOOR_SAMPLES / (double) VoiceSpectra.RATE;
@@ -353,7 +365,7 @@ final class VoicePatchShortlist {
             int from = (int) Math.round(lead * audio.sampleRate());
             var spectral = audio.sampleRate() >= 16000 && from + VoiceSpectralBalance.SIZE <= audio.samples().length
                     ? spectralBalance.measure(audio.samples(), from, audio.sampleRate(), fundamental(note.pitch())) : null;
-            attacks.add(new PairedAttack((int) (note.start() / PAIRED_BLOCK_SECONDS),
+            attacks.add(new PairedAttack((int) (note.start() / blockSeconds),
                     new AttackProbe(note.pitch(), shape, spectral),
                     shape.peak() >= CLEAR_ONSET_RATIO * level(mono, 0, FLOOR_SAMPLES)
                             || ends.get(note.start()) >= note.start() - lead));
