@@ -149,7 +149,7 @@ final class CatalogueCli {
         var asset = catalogue.asset(exact.map(InstrumentCatalogue.Variant::assetId).orElse(id));
         var variants = exact.map(List::of).orElseGet(() -> catalogue.variants().stream()
                 .filter(item -> item.assetId().equals(id)).toList());
-        var labels = variants.stream().anyMatch(variant -> variant.target() == com.opensmpsdeck.project.TargetGame.S3K)
+        var labels = variants.stream().anyMatch(variant -> variant.target().s3kRules())
                 ? InstrumentCatalogue.labels(asset) : List.<InstrumentCatalogue.Label>of();
         var details = new Details(VERSION, profile(variants), asset, labels, variants);
         if (!brief) {
@@ -277,7 +277,7 @@ final class CatalogueCli {
     }
 
     private static String profile(TargetGame target) {
-        return target.id() + "-ntsc-v1";
+        return target.rulebook().id() + "-ntsc-v1";
     }
 
     private static void print(PrintStream out, Object value) { out.println(InstrumentCatalogue.json(value)); }

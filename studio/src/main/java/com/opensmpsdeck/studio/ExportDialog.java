@@ -63,7 +63,7 @@ final class ExportDialog {
         boolean nativeBank = project != null && project.nativeProgram() != null;
         Callable<ProjectExport.Source> source = journal != null ? journal
                 : () -> project == null ? ProjectExport.open(work) : new ProjectExport.Source(project, work);
-        RomGame game = project == null ? RomGame.parse(fallbackTarget.id()) : TestInGame.game(project);
+        RomGame game = project == null ? RomGame.parse(fallbackTarget.rulebook().id()) : TestInGame.game(project);
         String name = project == null ? work.getFileName().toString() : project.name();
         var target = project == null ? fallbackTarget : project.target();
         var packageOptions = new ExportPackageOptions(target,
@@ -81,6 +81,8 @@ final class ExportDialog {
         if (redacted) formats.getItems().setAll(Format.PORTABLE, Format.MOD, Format.DISASM);
         else formats.getItems().setAll(Format.WAV, Format.MP3, Format.VGM, Format.SMPS, Format.PACKAGE,
                 Format.PORTABLE, Format.MOD, Format.DISASM);
+        // Mods and disassembly kits patch a retail game. Other targets export portable packages.
+        if (!target.retail()) formats.getItems().removeAll(Format.MOD, Format.DISASM);
         formats.getSelectionModel().selectFirst();
         formats.setId("export-format");
         formats.setConverter(new javafx.util.StringConverter<>() {
@@ -172,7 +174,7 @@ final class ExportDialog {
         var dacRow = fieldRow("Replace DAC notes", replaceDac);
         showWhen(dacRow, kitSelected);
 
-        var packageGame = RomGame.parse(target.id());
+        var packageGame = RomGame.parse(target.rulebook().id());
         var roms = new SimpleObjectProperty<List<RomLibrary.Entry>>();
         var libraryError = new SimpleStringProperty("");
         var registered = Bindings.createObjectBinding(() -> entry(roms.get(), packageGame), roms);

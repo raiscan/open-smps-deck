@@ -6,10 +6,12 @@ public record TargetClock(TargetGame game, int tempo) {
     public static final TargetClock FRAME_CLOCK = new TargetClock(TargetGame.S3K, 0);
 
     public TargetClock {
+        // Clocks follow the driver rules, so a Candescence clock is an S3K clock.
+        game = game.rulebook();
         int minimum = switch (game) {
             case S1 -> 2;
             case S2 -> 1;
-            case S3K -> 0;
+            case S3K, CANDESCENCE -> 0;
         };
         if (tempo < minimum || tempo > 255)
             throw new IllegalArgumentException(game.id() + " tempo must be in " + minimum + "..255");
@@ -19,7 +21,7 @@ public record TargetClock(TargetGame game, int tempo) {
         return switch (game) {
             case S1 -> FRAMES_PER_SECOND * (tempo - 1.0) / tempo;
             case S2 -> FRAMES_PER_SECOND * tempo / 256.0;
-            case S3K -> FRAMES_PER_SECOND * (256 - tempo) / 256.0;
+            case S3K, CANDESCENCE -> FRAMES_PER_SECOND * (256 - tempo) / 256.0;
         };
     }
 
@@ -29,7 +31,7 @@ public record TargetClock(TargetGame game, int tempo) {
         return switch (game) {
             case S1 -> frames - frames / tempo;
             case S2 -> (frames + 1) * tempo / 256;
-            case S3K -> frames - frames * tempo / 256;
+            case S3K, CANDESCENCE -> frames - frames * tempo / 256;
         };
     }
 
@@ -38,7 +40,7 @@ public record TargetClock(TargetGame game, int tempo) {
         return switch (game) {
             case S1 -> tick + tick / (tempo - 1);
             case S2 -> ((tick + 1) * 256 + tempo - 1) / tempo - 2;
-            case S3K -> tick * 256 / (256 - tempo);
+            case S3K, CANDESCENCE -> tick * 256 / (256 - tempo);
         };
     }
 

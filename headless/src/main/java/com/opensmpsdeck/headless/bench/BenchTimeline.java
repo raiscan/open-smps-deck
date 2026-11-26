@@ -106,7 +106,7 @@ final class BenchTimeline implements SmpsNoteListener {
 
     static Truth read(StudioProject project, int frames, BenchCli.SequencerFactory factory, boolean captureVoices)
             throws InterruptedIOException {
-        if (project.target() == TargetGame.S3K)
+        if (project.target().s3kRules())
             return read(ProjectCompiler.compileWithAssets(project), frames, factory, captureVoices);
         var game = BenchCartridge.Game.valueOf(project.target().id());
         var walk = new BenchTimeline(game, true);

@@ -48,7 +48,7 @@ public final class TargetPlayback {
 
     static ClassicPackageDriver classic(TargetGame target) {
         return switch (target) {
-            case S3K -> null;
+            case S3K, CANDESCENCE -> null;
             case S1 -> ClassicPackageDriver.S1;
             case S2 -> ClassicPackageDriver.S2;
         };

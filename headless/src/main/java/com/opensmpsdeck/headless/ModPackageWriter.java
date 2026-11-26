@@ -16,6 +16,9 @@ final class ModPackageWriter {
         var ids = new TreeSet<>(replacements);
         if (ids.isEmpty() || ids.size() != replacements.size())
             throw new IllegalArgumentException("Supply one or more distinct --replace music IDs");
+        if (!com.opensmpsdeck.project.TargetGame.parse(manifest.driver()).retail())
+            throw new IllegalArgumentException("OpenGGF mods replace retail game music. Driver " + manifest.driver()
+                    + " has no retail music to replace; export a portable package instead.");
         var valid = PackageDriver.supported(manifest.driver()).musicIds();
         if (!valid.containsAll(ids)) throw new IllegalArgumentException("--replace requires a stock " + manifest.driver() + " music ID (decimal)");
         String prefix = "audio/smps/" + info.id() + "/";

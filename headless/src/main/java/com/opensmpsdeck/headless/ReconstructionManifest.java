@@ -374,12 +374,12 @@ final class ReconstructionManifest {
                 continue;
             }
             if (args[i].equals("--target")) {
-                if (target != null || ++i == args.length) throw new IllegalArgumentException("Expected one --target s1|s2|s3k");
+                if (target != null || ++i == args.length) throw new IllegalArgumentException("Expected one --target s1|s2|s3k|candescence");
                 target = TargetGame.parse(args[i]);
                 continue;
             }
             if (!args[i].equals("--search") || ++i == args.length)
-                throw new IllegalArgumentException("rerun expects --search DIR, --target s1|s2|s3k, --keep-voicing or --overwrite-detached");
+                throw new IllegalArgumentException("rerun expects --search DIR, --target s1|s2|s3k|candescence, --keep-voicing or --overwrite-detached");
             search.add(Path.of(args[i]).toAbsolutePath().normalize());
         }
         ReconstructionStages.rerun(Path.of(args[0]).toAbsolutePath().normalize(),

@@ -136,7 +136,7 @@ final class ReconstructionSpill {
         }
         var project = new StudioProject(4, raw.name(), "S3K", raw.ticksPerBeat(), raw.tempo(),
                 voices, List.of(sequence), raw.clips(), envelopes, raw.samples(), profile.game(),
-                profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());
+                profile.clock().game().s3kRules() ? null : profile.clock().tempo());
         double[] result = new double[gate + RELEASE_TICKS];
         int[] tick = {0};
         int[] attenuation = {15, 0};

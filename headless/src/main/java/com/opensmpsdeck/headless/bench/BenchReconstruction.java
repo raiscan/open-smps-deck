@@ -111,7 +111,7 @@ final class BenchReconstruction {
                                   BenchRolePlan.Mode rolePlan, List<BenchMetrics.Event> truthNotes,
                                   String steadyTempo, Integer leadPart, boolean captureVoices, TargetGame target)
             throws IOException {
-        if (target != TargetGame.S3K) {
+        if (!target.s3kRules()) {
             args.add("--target");
             args.add(target.id());
         }

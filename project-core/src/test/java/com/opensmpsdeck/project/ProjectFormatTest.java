@@ -15,7 +15,7 @@ class ProjectFormatTest {
         assertEquals(TargetGame.S3K, ProjectFormat.read(legacy).target());
         assertEquals(legacy, ProjectFormat.write(ProjectFormat.read(legacy)));
         assertFalse(legacy.contains("\"target\""));
-        for (var game : List.of(TargetGame.S1, TargetGame.S2)) {
+        for (var game : List.of(TargetGame.S1, TargetGame.S2, TargetGame.CANDESCENCE)) {
             var tagged = original.withTarget(game);
             var restored = ProjectFormat.read(ProjectFormat.write(tagged));
             assertEquals(tagged, restored);
@@ -24,6 +24,25 @@ class ProjectFormatTest {
         }
         assertThrows(IllegalArgumentException.class,
                 () -> ProjectFormat.read(legacy.replace("\"mode\":", "\"target\": \"scd\", \"mode\":")));
+    }
+
+    @Test void candescenceIsItsOwnTargetOnTheS3kRulebook() {
+        assertEquals(TargetGame.CANDESCENCE, TargetGame.parse("candescence"));
+        assertEquals(TargetGame.S3K, TargetGame.CANDESCENCE.rulebook());
+        assertTrue(TargetGame.CANDESCENCE.s3kRules());
+        assertFalse(TargetGame.CANDESCENCE.retail());
+        for (var game : List.of(TargetGame.S1, TargetGame.S2, TargetGame.S3K)) {
+            assertEquals(game, game.rulebook());
+            assertTrue(game.retail());
+        }
+        var project = fixture().withTarget(TargetGame.CANDESCENCE);
+        assertTrue(ProjectFormat.write(project).matches("(?s).*\"target\":\\s*\"candescence\".*"));
+        assertEquals(fixture().clock(), project.clock());
+        assertArrayEquals(ProjectCompiler.compileWithAssets(fixture()).song(),
+                ProjectCompiler.compileWithAssets(project).song());
+        var profile = TargetProfile.of(TargetGame.CANDESCENCE);
+        assertEquals(TargetProfile.S3K.withGame(TargetGame.CANDESCENCE), profile);
+        assertThrows(IllegalArgumentException.class, () -> TargetProfile.S3K.withGame(TargetGame.S1));
     }
 
     @Test void classicNativeTempoSurvivesSettingsAndReviewEdits() {
@@ -40,10 +59,11 @@ class ProjectFormatTest {
         int[] cycles = {301, 295, 297};
         for (var game : TargetGame.values()) {
             var profile = TargetProfile.of(game);
-            boolean s3k = game == TargetGame.S3K;
+            assertEquals(game, profile.game());
+            boolean s3k = game.s3kRules();
             assertEquals(new TargetProfile.PitchRange(s3k ? 45 : 48, s3k ? 117 : 116), profile.psg());
             assertEquals(new TargetProfile.PitchRange(12, 106), profile.fm());
-            assertEquals(cycles[game.ordinal()], profile.dacBaseCycles());
+            assertEquals(cycles[game.rulebook().ordinal()], profile.dacBaseCycles());
             assertEquals(s3k ? TargetProfile.EnvelopeGrammar.S3K_CONTROLS : TargetProfile.EnvelopeGrammar.HOLD_80,
                     profile.envelopeGrammar());
             assertEquals(s3k, profile.modulationEnvelopes());
@@ -54,7 +74,7 @@ class ProjectFormatTest {
             assertEquals(switch (game) {
                 case S1 -> 60 * 254.0 / 255;
                 case S2 -> 60 * 255.0 / 256;
-                case S3K -> 60.0;
+                case S3K, CANDESCENCE -> 60.0;
             }, profile.ticksPerSecond());
             assertEquals(32_768, profile.bankLimitBytes());
         }

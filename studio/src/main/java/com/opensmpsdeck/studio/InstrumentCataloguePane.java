@@ -301,7 +301,7 @@ final class InstrumentCataloguePane extends VBox implements AutoCloseable {
         if (!names.isEmpty()) label.append(" — ").append(names.stream().map(InstrumentCatalogue.Label::text)
                 .distinct().collect(java.util.stream.Collectors.joining(" / ")));
         label.append(" · ").append(kindName(match.asset().kind()));
-        if (variant.target() != com.opensmpsdeck.project.TargetGame.S3K)
+        if (!variant.target().s3kRules())
             label.append(" · ").append(variant.driver().toUpperCase(java.util.Locale.ROOT));
         if (recipe.rate() != null) label.append(" · rate %02X".formatted(recipe.rate()));
         if (recipe.pan() != null) label.append(" · pan %02X".formatted(recipe.pan()));

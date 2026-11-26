@@ -41,7 +41,7 @@ final class McpReconstruction {
             field("stems", object(Map.of("type", "object", "additionalProperties", Map.of("type", "string"))),
                     "Map of MIDI part IDs or audio-only stem labels to absolute aligned WAV paths").optional());
     static final JsonObject OPTIONS = schema(
-            choice("target", "Target game (default s3k, or the saved target when resuming)", "s1", "s2", "s3k").optional(),
+            choice("target", "Target game (default s3k, or the saved target when resuming). candescence follows the S3K rulebook", "s1", "s2", "s3k", "candescence").optional(),
             field("seconds", "number", "Duration from time zero, in (0, 600] seconds").optional(),
             field("name", "string", "Project title").optional(),
             field("ticksPerBeat", "integer", "Studio ruler ticks per beat").optional(),

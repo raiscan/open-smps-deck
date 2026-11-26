@@ -54,7 +54,7 @@ public final class CatalogueSources {
         String source = image.path().getFileName().toString();
         TargetGame game = TargetGame.parse(image.revision().game().id());
         try (var rom = Rom.fromReader(RomByteReader.fromBytes(bytes), source)) {
-            if (game != TargetGame.S3K) {
+            if (!game.s3kRules()) {
                 ClassicCatalogueSources.scanRom(game, rom, bytes, source, revision, catalogue);
                 return;
             }
@@ -74,7 +74,7 @@ public final class CatalogueSources {
     /** Project declaration and playback scan. The supplied source/revision identify its input. */
     public static void scanProject(StudioProject project, String source, String revision, Builder catalogue)
             throws InterruptedException {
-        if (project.target() == TargetGame.S3K) {
+        if (project.target().s3kRules()) {
             scan(project, source, revision, null, catalogue);
         } else {
             var playback = TargetPlayback.prepare(project);

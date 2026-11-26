@@ -72,7 +72,7 @@ class ReconstructionPsgEnvelopesTest {
     void selectsThePresetForEachTarget() {
         for (var target : TargetGame.values()) {
             var preset = ReconstructionLanePolicies.defaultPreset(target);
-            assertEquals(target.id() + "-layering", ReconstructionLanePolicies.Configuration.preset(preset).preset());
+            assertEquals(target.rulebook().id() + "-layering", ReconstructionLanePolicies.Configuration.preset(preset).preset());
         }
     }
 
@@ -123,7 +123,7 @@ class ReconstructionPsgEnvelopesTest {
                 assertTrue(low >= 0 && low + 1 < writes.size(), target + " " + writes);
                 assertEquals(expectedPeriod >> 4, writes.get(low + 1), target + " " + writes);
                 assertTrue(writes.contains(0xf0), target + " noise channel must sound");
-                assertEquals(target == TargetGame.S3K ? 117 : 116, project.sequences().getFirst().notes().getFirst().pitch());
+                assertEquals(target.s3kRules() ? 117 : 116, project.sequences().getFirst().notes().getFirst().pitch());
             }
         }
     }
@@ -199,7 +199,7 @@ class ReconstructionPsgEnvelopesTest {
         return new StudioProject(4, "Probe", "S3K", 30, 0, List.of(), List.of(sequence),
                 List.of(new Clip("probe", "probe", lane, 0, gate)),
                 envelope == null ? List.of() : List.of(envelope), List.of(),
-                game, game == TargetGame.S3K ? null : 255);
+                game, game.s3kRules() ? null : 255);
     }
 
     private static List<Integer> attenuation(StudioProject project, int gate) throws Exception {
@@ -213,7 +213,7 @@ class ReconstructionPsgEnvelopesTest {
             writes.clear();
         };
         var envelope = project.envelopes().getFirst();
-        if (project.target() == TargetGame.S3K && (envelope.bytes().contains(0x82) || envelope.bytes().contains(0x84))) {
+        if (project.target().s3kRules() && (envelope.bytes().contains(0x82) || envelope.bytes().contains(0x84))) {
             // Project preflight restricts these controls. Feed the synthetic
             // raw envelope to the same pinned S3K session independently.
             var setup = new Envelope(envelope.id(), envelope.name(), envelope.type(), List.of(0, 0x81));

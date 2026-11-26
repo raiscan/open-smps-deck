@@ -269,7 +269,7 @@ public final class ProjectFormat {
         range(project.ticksPerBeat(),1,Integer.MAX_VALUE,"ticksPerBeat"); range(project.tempo(),0,255,"tempo");
         NativeProgram nativeProgram = project.nativeProgram();
         if (project.nativeTempo() != null) {
-            if (nativeProgram != null || project.target() == TargetGame.S3K || project.tempo() != 0)
+            if (nativeProgram != null || project.target().s3kRules() || project.tempo() != 0)
                 throw invalid("nativeTempo", "requires a classic target arrangement with fallback tempo zero");
             range(project.nativeTempo(), project.target() == TargetGame.S1 ? 2 : 1, 255, "nativeTempo");
         }

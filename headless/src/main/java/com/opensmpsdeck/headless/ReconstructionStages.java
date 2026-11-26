@@ -189,7 +189,7 @@ public final class ReconstructionStages {
         TargetProfile profile() {
             var profile = inputs == null ? TargetProfile.S3K : inputs.profile();
             // R1 tagged classic projects still used a 60 Hz arrangement grid.
-            return profile.game() != TargetGame.S3K && ticksPerSecond != null && ticksPerSecond.doubleValue() == 60
+            return !profile.game().s3kRules() && ticksPerSecond != null && ticksPerSecond.doubleValue() == 60
                     ? profile.withClock(TargetClock.FRAME_CLOCK) : profile;
         }
 
@@ -1431,7 +1431,7 @@ public final class ReconstructionStages {
             boolean selectedLead = java.util.Objects.equals(lead, part.id());
             boolean guitar = part.program() >= 24 && part.program() <= 31;
             if (newParts.contains(part.id())) {
-                if ((selectedLead || guitar) && inputs.targetGame() == TargetGame.S3K) {
+                if ((selectedLead || guitar) && inputs.targetGame().s3kRules()) {
                     var audio = ReconstructionLeadAudio.readMono(Path.of(stem), score.durationUs / 1e6);
                     approaches.addAll(ReconstructionBendRecovery.detect(audio,
                             notes.stream().filter(note -> note.part == part.id()).toList(), true));
@@ -1476,7 +1476,7 @@ public final class ReconstructionStages {
                     var bend = tracker.detect(note);
                     if (bend != null) notes.set(i, note.withBend(bend));
                 }
-                if (inputs.targetGame() == TargetGame.S3K && (selectedLead || guitar || lead == null))
+                if (inputs.targetGame().s3kRules() && (selectedLead || guitar || lead == null))
                     approaches.addAll(ReconstructionBendRecovery.detect(audio,
                             notes.stream().filter(note -> note.part == part.id()).toList(), selectedLead || guitar));
             }
@@ -1563,7 +1563,7 @@ public final class ReconstructionStages {
     private static Score prepare(MidiScore original, Path reference, ReconstructionCli.Options options,
                                  long durationUs, String source) throws IOException {
         Number tickRate = TargetClock.FRAMES_PER_SECOND;
-        if (options.target() != TargetGame.S3K) tickRate = options.profile().ticksPerSecond();
+        if (!options.target().s3kRules()) tickRate = options.profile().ticksPerSecond();
         int frames = (int) ((durationUs * TargetClock.FRAMES_PER_SECOND + MICROS_PER_SECOND - 1) / MICROS_PER_SECOND);
         for (int part : options.stems().keySet()) {
             if (original.parts().stream().noneMatch(p -> p.id() == part))

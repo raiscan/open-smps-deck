@@ -38,7 +38,7 @@ final class StockVoicePrior {
 
     static StockVoicePrior forNotes(ReconstructionStages.Score score, List<ReconstructionAllocation.Entry> notes,
                                     Path mix, Map<Integer, Path> stems, Role role) {
-        if (score.inputs().targetGame() != TargetGame.S3K || role == Role.drums) return null;
+        if (!score.inputs().targetGame().s3kRules() || role == Role.drums) return null;
         int part = notes.getFirst().note().part();
         Path stem = stems.get(part);
         if (stem == null || stem.equals(mix) || notes.stream().anyMatch(n -> n.note().part() != part)) return null;

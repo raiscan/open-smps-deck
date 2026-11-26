@@ -104,7 +104,7 @@ final class PortablePackageReader {
             if (asset.origin().license() != null) Metadata.validateLicense(asset.origin().license());
             Integer globalSlot = globalIndex.get(asset.key());
             if (asset.ref() != null) {
-                require(asset.ref().game().equals(driver), asset.key() + " reference game must match package driver");
+                require(asset.ref().game().equals(dialect.stockGame()), asset.key() + " reference game must match package driver");
                 if (dialect instanceof ClassicPackageDriver && asset.ref().table().equals("local-fm"))
                     require(dialect.musicIds().contains(asset.ref().songId()), asset.key() + " has unknown " + driver + " music ID");
                 if (asset.resultSha256() != null) hash(asset.resultSha256(), asset.key() + " resultSha256");
@@ -221,7 +221,7 @@ final class PortablePackageReader {
 
     private static void validateDriverOptions(PackageManifest manifest) {
         var options = manifest.driverOptions();
-        if (manifest.driver().equals("s3k")) {
+        if (PackageDriver.supported(manifest.driver()) instanceof S3kPackageDriver) {
             require(options.isEmpty(), "S3K driverOptions must be empty");
         } else {
             require(options.keySet().equals(Set.of("speedUpTempo")), "Expected driverOptions.speedUpTempo");

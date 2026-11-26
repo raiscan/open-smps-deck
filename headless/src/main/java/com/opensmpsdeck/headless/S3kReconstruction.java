@@ -261,7 +261,7 @@ final class S3kReconstruction {
         StudioProject project = new StudioProject(4, name, "S3K", ticksPerBeat, 0,
                 voices.values().stream().filter(voice -> usedVoices.contains(voice.id())).toList(),
                 sequences, clips, List.copyOf(envelopes.values()),
-                samples.values().stream().filter(sample -> usedSamples.contains(sample.id())).toList(), profile.game(), profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());
+                samples.values().stream().filter(sample -> usedSamples.contains(sample.id())).toList(), profile.game(), profile.clock().game().s3kRules() ? null : profile.clock().tempo());
         var adapted = ReconstructionPsgEnvelopes.forAssembly(project,
                 ReconstructionPsgEnvelopes.classicCatalogueEnvelopes(catalogue, profile.game()));
         return new Result(adapted.project(), fmNotes, psg.stream().mapToInt(List::size).sum(),
@@ -628,7 +628,7 @@ final class S3kReconstruction {
                 // Staged vibrato is FM-only. Its pitch commands take precedence over bends on the same gate.
                 if (envelope != null) {
                     placed.vibratoEnvelope = ReconstructionBendEncoding.envelope(note.pitch(), placed.detune, duration, envelope);
-                } else if (bends && !isFm && !pitchedNoise && profile.game() == TargetGame.S3K
+                } else if (bends && !isFm && !pitchedNoise && profile.game().s3kRules()
                         && ReconstructionBendRecovery.psgCompatible(curve)) {
                     placed.bend = ReconstructionLayerPitch.fitPsg(entry.note(), start, duration, placed.detune, profile);
                 } else if (bends && curve != null && (lane.equals("FM1") || isFm && curve.editReason() != null)) {
@@ -712,7 +712,7 @@ final class S3kReconstruction {
             }
         }
         var project = new StudioProject(4, name, "S3K", ticksPerBeat, 0, List.copyOf(voices.values()),
-                sequences, clips, List.copyOf(envelopes.values()), List.copyOf(samples.values()), profile.game(), profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());
+                sequences, clips, List.copyOf(envelopes.values()), List.copyOf(samples.values()), profile.game(), profile.clock().game().s3kRules() ? null : profile.clock().tempo());
         var adapted = ReconstructionPsgEnvelopes.forAssembly(project,
                 ReconstructionPsgEnvelopes.classicCatalogueEnvelopes(catalogue, profile.game()));
         return new Result(adapted.project(), fmNotes, psgNotes, dac.size(), echoNotes,
@@ -1778,7 +1778,7 @@ final class S3kReconstruction {
     }
 
     static boolean safePsg(byte[] program, TargetGame target) {
-        if (target != TargetGame.S3K)
+        if (!target.s3kRules())
             return program.length > 1 && program[program.length - 1] == (byte) 0x80;
         for (byte value : program)
             if (Byte.toUnsignedInt(value) > 15 && value != (byte) 0x80

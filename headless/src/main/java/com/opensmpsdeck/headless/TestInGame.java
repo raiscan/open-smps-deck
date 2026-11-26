@@ -59,7 +59,8 @@ public final class TestInGame {
     }
 
     public static RomGame game(StudioProject project) {
-        return RomGame.parse(project.target().id());
+        // A target without its own ROM is tested in the retail game whose rules it follows.
+        return RomGame.parse(project.target().rulebook().id());
     }
 
     static RomGame game(String driver) {
@@ -67,7 +68,7 @@ public final class TestInGame {
         return switch (id) {
             case "s1" -> RomGame.S1;
             case "s2" -> RomGame.S2;
-            case "s3k" -> RomGame.S3K;
+            case "s3k", "candescence" -> RomGame.S3K;
             default -> throw unavailable(id);
         };
     }

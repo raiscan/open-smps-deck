@@ -198,7 +198,7 @@ final class ReconstructionHeldNotes {
                 var raw = CataloguePlayback.matchProbe(catalogue, candidate.id(), pitch, ticks, true, profile.game());
                 var probe = new StudioProject(4, raw.name(), "S3K", raw.ticksPerBeat(),
                         raw.tempo(), raw.voices(), raw.sequences(), raw.clips(), raw.envelopes(), raw.samples(),
-                        profile.game(), profile.game() == TargetGame.S3K ? null : clock.tempo());
+                        profile.game(), profile.game().s3kRules() ? null : clock.tempo());
                 double[] levels = power(TargetPlayback.prepare(probe),
                         Math.max(1, (int) clock.frameAtTick(ticks)), S3kRenderer.ChannelMask.NONE);
                 loss += sustainLoss(levels, example.earlySeconds(), tail, example.source().minimumDecayDb());

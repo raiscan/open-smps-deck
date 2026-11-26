@@ -111,7 +111,7 @@ final class ReconstructionNoteVoicing {
             var misses = new ArrayList<String>();
             String issue = null;
             try {
-                require(envelope == null || score.profile().game() == TargetGame.S3K, edit.id(), "vibratoEnvelope requires the S3K target");
+                require(envelope == null || score.profile().game().s3kRules(), edit.id(), "vibratoEnvelope requires the S3K target");
                 if (instrument != null) instrument.validate(catalogue, edit.id());
                 for (String id : edit.noteIds()) {
                     var entry = entries.get(id);

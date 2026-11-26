@@ -78,6 +78,11 @@ stop if the selected driver cannot play an envelope or command used by the
 arrangement. S1 and S2 builds place notes on their respective driver clocks
 (about 59.76 ticks per second), accounting for the frames where each driver
 holds durations. The project keeps its target and native tempo for export.
+Choose **CANDESCENCE** for songs bound for Candescence. It follows the S3K
+rules for now and renders exactly like S3K, but the project keeps the
+Candescence target. Its lane-policy preset is S3K layering, Test in game
+previews it in S3K, and Export offers portable packages but not mods or
+disassembly kits.
 For an S1 or S2 song with DAC drums, register the clean cartridge in the
 ROM library before starting. Reconstruction fits the game's stock kit.
 The [headless drum kit options](06-dac-samples.md#drum-sources-in-headless-reconstruction)

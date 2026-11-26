@@ -114,9 +114,18 @@ class ReconstructionEditsTest {
             assertEquals(com.opensmpsdeck.project.ProjectFormat.write(canonical.project()),
                     com.opensmpsdeck.project.ProjectFormat.write(export.project()));
             for (var format : ProjectExport.Format.values()) {
+                if (!target.retail() && (format == ProjectExport.Format.MOD || format == ProjectExport.Format.DISASM)) {
+                    // Mods and disassembly kits patch retail games only.
+                    var refused = dir.resolve("refused." + format.extension());
+                    var settings = format == ProjectExport.Format.MOD
+                            ? new ProjectExport.PortableSettings(target.id(), false, null, null, null, List.of(), List.of(1)) : null;
+                    assertThrows(IllegalArgumentException.class, () -> ProjectExport.write(export, refused,
+                            new ProjectExport.Options(format, null, null, null, null, false, false, settings), (a, b, c) -> {}));
+                    continue;
+                }
                 var portable = format == ProjectExport.Format.MOD
                         ? new ProjectExport.PortableSettings(target.id(), false, null, null, null,
-                                List.of(), List.of(target == TargetGame.S3K ? 1 : 0x81))
+                                List.of(), List.of(target.s3kRules() ? 1 : 0x81))
                         : null;
                 var options = new ProjectExport.Options(format, null, null, null, null, false, false, portable);
                 var fromSession = dir.resolve("live." + format.extension());
@@ -1322,11 +1331,11 @@ class ReconstructionEditsTest {
         var bytes = new byte[patch.bytes().size()];
         for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
         String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
-        String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock(target));
+        String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock(target.rulebook()));
         if (psg) {
             String envelope = builder.asset(InstrumentCatalogue.Kind.PSG_VOLUME, "Chord envelope",
                     new byte[]{0, (byte) 0x80});
-            builder.variant(envelope, "Chord envelope", InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock(target));
+            builder.variant(envelope, "Chord envelope", InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock(target.rulebook()));
         }
         var catalogue = builder.build();
         catalogue.save(index);

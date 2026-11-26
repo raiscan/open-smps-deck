@@ -308,7 +308,7 @@ public final class Main {
             } else {
                 requireDifferentFiles(previousPath, output);
                 var previous = PortablePackages.openProject(previousPath, roms, err);
-                if ((playback != null && playback.target() != TargetGame.S3K) || previous.target() != TargetGame.S3K)
+                if ((playback != null && !playback.target().s3kRules()) || !previous.target().s3kRules())
                     throw new IllegalArgumentException("Previous-music restoration is available for S3K playback");
                 WaveFile.renderWithPreviousMusic(ProjectCompiler.compileWithAssets(previous), previousPresentations, song, target.path(), range, mask);
             }
@@ -387,7 +387,7 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar describe-notes PROJECT.json --sequence ID --notes IDS [--clip JSON] [--context 1bar] [--revision HASH]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar inspect-project PROJECT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project PROJECT.json OUTPUT.bin [--linear]");
-        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package PROJECT.json OUTPUT.smps.zip [--rom PATH] [--portable [--driver s1|s2|s3k] [--speed-up-tempo S3K_BYTE] [--strict-tempo] [--retail-patch]]");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package PROJECT.json OUTPUT.smps.zip [--rom PATH] [--portable [--driver s1|s2|s3k|candescence] [--speed-up-tempo S3K_BYTE] [--strict-tempo] [--retail-patch]]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project PROJECT.json OUTPUT.wav [--frames N] [--linear] [--force]");
         out.println("           [--solo LANES] [--mute LANES] [--start S] [--end S]");
         out.println("           [--previous-project PROJECT.json --previous-frames N]");
@@ -402,7 +402,7 @@ public final class Main {
         out.println("N: 1..36000 NTSC presentations, default 120; native projects use previewFrames and arranged DAC projects include their sample tail.");
         out.println("Outputs must not already exist. Projects: strict JSON versions 1–5 with explicit native-bank dependencies.");
         out.println("       export PROJECT.json|WORK_DIR|PACKAGE.smps.zip OUTPUT --format wav|mp3|vgm|smps|package|portable|mod|disasm");
-        out.println("              Portable/mod: [--driver s1|s2|s3k] [--speed-up-tempo S3K_BYTE] [--strict-tempo] [--retail-patch]");
+        out.println("              Portable/mod: [--driver s1|s2|s3k|candescence] [--speed-up-tempo S3K_BYTE] [--strict-tempo] [--retail-patch]");
         out.println("       export PROJECT OUTPUT --format rom|bps [ROM patch options]");
         out.println("              [--start SEC] [--end SEC] [--fade SEC] [--loops N] [--stems [--zip]]");
         out.println("Binary input: finite standalone S3K data, local FM voices; envelope/DAC dependencies require render-project.");

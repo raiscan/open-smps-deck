@@ -20,7 +20,10 @@ import java.util.HashMap;
 import java.util.Map;
 
 final class S3kPackageDriver implements PackageDriver {
-    static final S3kPackageDriver INSTANCE = new S3kPackageDriver();
+    static final S3kPackageDriver INSTANCE = new S3kPackageDriver("s3k");
+    // Candescence follows the stock S3K rulebook. Its packages declare their own driver
+    // but still reference stock S3K assets.
+    static final S3kPackageDriver CANDESCENCE = new S3kPackageDriver("candescence");
 
     // The resolver lazily caches local FM tables while the ROM is open.
     static final class RomSource implements StockAssets {
@@ -90,9 +93,13 @@ final class S3kPackageDriver implements PackageDriver {
         return pcm;
     }
 
-    private S3kPackageDriver() {}
+    private final String id;
 
-    @Override public String id() { return "s3k"; }
+    private S3kPackageDriver(String id) { this.id = id; }
+
+    @Override public String id() { return id; }
+
+    @Override public String stockGame() { return "s3k"; }
 
     @Override public void validateBase(int base) {
         if (base != 0 && base != 32768) throw new IllegalArgumentException("S3K bank base must be 0 or 32768");

@@ -13,6 +13,9 @@ interface PackageDriver {
     record Image(StockAssets assets, boolean known) {}
 
     String id();
+
+    /** Game ID of the stock assets this driver references. */
+    default String stockGame() { return id(); }
     void validateBase(int base);
     Image openRom(Path path) throws IOException;
     void preflight(CompiledProject project);
@@ -39,6 +42,7 @@ interface PackageDriver {
             case "s1" -> ClassicPackageDriver.S1;
             case "s2" -> ClassicPackageDriver.S2;
             case "s3k" -> S3kPackageDriver.INSTANCE;
+            case "candescence" -> S3kPackageDriver.CANDESCENCE;
             case "scd" -> throw new IllegalArgumentException("driver scd is not a music target (Sonic CD FM has no music loader)");
             default -> throw new IllegalArgumentException("Unknown package driver " + id);
         };

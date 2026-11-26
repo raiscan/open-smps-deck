@@ -20,6 +20,7 @@ public record TargetProfile(TargetGame game, PitchRange psg, PitchRange fm, int 
             TargetClock.FRAME_CLOCK, ProjectCompiler.MAX_BANK_BYTES);
     private static final TargetProfile S1 = classic(TargetGame.S1, 301);
     private static final TargetProfile S2 = classic(TargetGame.S2, 295);
+    private static final TargetProfile CANDESCENCE = S3K.withGame(TargetGame.CANDESCENCE);
 
     private static TargetProfile classic(TargetGame game, int dacBaseCycles) {
         return new TargetProfile(game, CLASSIC_PSG, FM, dacBaseCycles, EnvelopeGrammar.HOLD_80,
@@ -31,10 +32,19 @@ public record TargetProfile(TargetGame game, PitchRange psg, PitchRange fm, int 
             case S1 -> S1;
             case S2 -> S2;
             case S3K -> S3K;
+            case CANDESCENCE -> CANDESCENCE;
         };
     }
 
     public double ticksPerSecond() { return clock.ticksPerSecond(); }
+
+    /** The same driver rules for another target that shares them. */
+    public TargetProfile withGame(TargetGame game) {
+        if (game.rulebook() != this.game.rulebook())
+            throw new IllegalArgumentException(game.id() + " does not follow the " + this.game.id() + " rulebook");
+        return new TargetProfile(game, psg, fm, dacBaseCycles, envelopeGrammar, modulationEnvelopes,
+                fmVolumeEnvelopes, ssgEg, carrierSelection, clock, bankLimitBytes);
+    }
 
     public TargetProfile withClock(TargetClock clock) {
         return new TargetProfile(game, psg, fm, dacBaseCycles, envelopeGrammar, modulationEnvelopes,

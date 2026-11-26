@@ -840,7 +840,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         var stages = List.<ReconstructionEditing.VibratoSegment>of();
         int vibratoTick = 0;
         if (mode == Mode.VIBRATO) {
-            if (model.target() != TargetGame.S3K) {
+            if (!model.target().s3kRules()) {
                 error.accept("Vibrato envelopes require an S3K target.");
                 return;
             }

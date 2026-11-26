@@ -82,7 +82,7 @@ final class ReconstructionPsgEnvelopes {
     }
 
     static Set<String> classicCatalogueEnvelopes(InstrumentCatalogue catalogue, TargetGame target) {
-        if (target == TargetGame.S3K) return Set.of();
+        if (target.s3kRules()) return Set.of();
         return catalogue.forTarget(target).assets().stream()
                 .filter(asset -> asset.kind() == InstrumentCatalogue.Kind.PSG_VOLUME
                         && S3kReconstruction.safePsg(asset.bytes(), target))
@@ -94,7 +94,7 @@ final class ReconstructionPsgEnvelopes {
     }
 
     static Envelope forProbe(Envelope envelope, TargetGame target, int gate, boolean classicSource) {
-        if (target == TargetGame.S3K || !envelope.type().equals(Envelope.PSG_VOLUME)) return envelope;
+        if (target.s3kRules() || !envelope.type().equals(Envelope.PSG_VOLUME)) return envelope;
         return withBytes(envelope, translation(envelope, gate, classicSource).bytes());
     }
 
@@ -119,7 +119,7 @@ final class ReconstructionPsgEnvelopes {
     }
 
     static Adapted forAssembly(StudioProject project, Set<String> classicSources) {
-        if (project.target() == TargetGame.S3K) return new Adapted(project, null);
+        if (project.target().s3kRules()) return new Adapted(project, null);
         var gates = new HashMap<String, Integer>();
         var byId = new HashMap<String, Sequence>();
         for (var sequence : project.sequences()) byId.put(sequence.id(), sequence);
@@ -156,9 +156,9 @@ final class ReconstructionPsgEnvelopes {
                 continue;
             }
             // Preserve exact stock bytes where possible before canonicalizing a held tail.
-            var ref = StockTable.match(Envelope.PSG_VOLUME, StockTable.bytes(translation.bytes()), project.target().id());
+            var ref = StockTable.match(Envelope.PSG_VOLUME, StockTable.bytes(translation.bytes()), project.target().rulebook().id());
             if (ref != null) bytes = translation.bytes();
-            if (ref == null) ref = StockTable.match(Envelope.PSG_VOLUME, StockTable.bytes(bytes), project.target().id());
+            if (ref == null) ref = StockTable.match(Envelope.PSG_VOLUME, StockTable.bytes(bytes), project.target().rulebook().id());
             if (ref == null && !stock.isEmpty()) {
                 int slot = closeStock(bytes, gate, stock);
                 if (slot != 0) {

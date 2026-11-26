@@ -237,7 +237,7 @@ public final class InstrumentCatalogue {
         StockRef best = null;
         boolean stock = false;
         for (var variant : choices) {
-            if (target != null && target != variant.target()) continue;
+            if (target != null && target.rulebook() != variant.target()) continue;
             for (var usage : variant.occurrences()) {
                 String game = variant.driver();
                 boolean retailSong = usage.songId() != null;
@@ -245,7 +245,7 @@ public final class InstrumentCatalogue {
                 if (usage.table() == null || usage.slot() == null) continue;
                 String table = switch (usage.table()) {
                     case "global-fm", "local-fm" -> retailSong ? usage.table() : null;
-                    case "dac" -> retailSong || variant.target() != TargetGame.S3K ? "dac" : null;
+                    case "dac" -> retailSong || !variant.target().s3kRules() ? "dac" : null;
                     case "psg-envelope" -> retailSong ? "psg" : null;
                     case "modulation" -> retailSong ? "mod" : null;
                     case "psg" -> "psg";
@@ -263,9 +263,9 @@ public final class InstrumentCatalogue {
             }
         }
         if (best == null) {
-            best = target == null || target == TargetGame.S3K ? StockTable.matchProjectAsset(asset.kind().name(), bytes)
+            best = target == null || target.s3kRules() ? StockTable.matchProjectAsset(asset.kind().name(), bytes)
                     : StockTable.match(asset.kind().name(), target == TargetGame.S2 && asset.kind() == Kind.FM_VOICE
-                            ? ClassicPackageDriver.S2.voiceBytes(bytes) : bytes, target.id());
+                            ? ClassicPackageDriver.S2.voiceBytes(bytes) : bytes, target.rulebook().id());
         }
         return stock || best != null ? AssetOrigin.stock(best) : null;
     }
@@ -274,12 +274,14 @@ public final class InstrumentCatalogue {
         return open(path).forTarget(target);
     }
 
-    public InstrumentCatalogue forTarget(TargetGame target) {
+    public InstrumentCatalogue forTarget(TargetGame requested) {
+        // Catalogue variants belong to retail drivers. Other targets use the rulebook they follow.
+        TargetGame target = requested == null ? null : requested.rulebook();
         if (scope == target) return this;
         var filtered = index.variants().stream().filter(variant -> variant.target() == target).toList();
         // Preserve unbound assets from legacy S3K scans. They are available for
         // inspection or use as dependencies even when no audition was indexed.
-        if (target == TargetGame.S3K && filtered.size() == index.variants().size()) return this;
+        if (target.s3kRules() && filtered.size() == index.variants().size()) return this;
         var selected = new java.util.HashSet<String>();
         for (var variant : filtered) {
             selected.add(variant.assetId());
@@ -334,12 +336,12 @@ public final class InstrumentCatalogue {
         var key = new ContourKey(target, shape.bytes());
         return stockContours.computeIfAbsent(key, ignored -> {
             var desired = contour(shape.bytes(), false);
-            return variants().stream().filter(variant -> variant.target() == target)
+            return variants().stream().filter(variant -> variant.target() == target.rulebook())
                     .map(variant -> asset(variant.assetId())).distinct()
                     .filter(asset -> asset.kind() == Kind.PSG_VOLUME && S3kReconstruction.safePsg(asset.bytes(), target))
                     .filter(asset -> origin(asset, target) != null)
                     .min(Comparator.comparingDouble((Asset asset) -> {
-                        var levels = contour(StockAssets.unsigned(asset.bytes()), target != TargetGame.S3K);
+                        var levels = contour(StockAssets.unsigned(asset.bytes()), !target.s3kRules());
                         double error = 0;
                         for (int i = 0; i < desired.length; i++) error += Math.pow(desired[i] - levels[i], 2);
                         return error;
@@ -381,7 +383,7 @@ public final class InstrumentCatalogue {
 
     List<FmUsage> retailFmUsage(String assetId) {
         return assetVariants.getOrDefault(assetId, List.of()).stream()
-                .filter(variant -> variant.target() == TargetGame.S3K)
+                .filter(variant -> variant.target().s3kRules())
                 .flatMap(variant -> variant.occurrences().stream())
                 .filter(usage -> usage.played() && usage.songId() != null)
                 .map(Occurrence::fmUsage).filter(Objects::nonNull).distinct().toList();
@@ -390,7 +392,7 @@ public final class InstrumentCatalogue {
     /** Saved detector votes can name a variant absent from the active catalogue. */
     java.util.Optional<Match> stockVariant(String id, TargetGame target) {
         var variant = variants.get(id);
-        if (variant == null || variant.target() != target) return java.util.Optional.empty();
+        if (variant == null || variant.target() != target.rulebook()) return java.util.Optional.empty();
         return java.util.Optional.of(new Match(asset(variant.assetId()), variant));
     }
 
@@ -404,7 +406,7 @@ public final class InstrumentCatalogue {
         var choices = assetVariants.get(id);
         if (choices == null) throw new IllegalArgumentException("Unknown catalogue asset or variant " + id);
         if (target != null && choices.size() > 1) {
-            var preferred = choices.stream().filter(variant -> variant.target() == target).toList();
+            var preferred = choices.stream().filter(variant -> variant.target() == target.rulebook()).toList();
             if (!preferred.isEmpty()) choices = preferred;
         }
         if (choices.size() != 1)
@@ -454,7 +456,7 @@ public final class InstrumentCatalogue {
      * existing indices gain them without a rescan. DAC labels follow the rate.
      */
     public static List<Label> labels(Match row) {
-        if (row.variant().target() != TargetGame.S3K) return List.of();
+        if (!row.variant().target().s3kRules()) return List.of();
         return StockNames.labels(row.asset().kind(), row.asset().bytes(), row.variant().recipe().rate());
     }
 
@@ -548,7 +550,7 @@ public final class InstrumentCatalogue {
 
     private static String variantId(String assetId, Recipe recipe, TargetGame target) {
         String identity = assetId + "\n" + JSON.toJson(recipe);
-        if (target != TargetGame.S3K) identity = target.id() + "\n" + identity;
+        if (!target.s3kRules()) identity = target.id() + "\n" + identity;
         return "variant-" + digest(identity.getBytes(StandardCharsets.UTF_8));
     }
 

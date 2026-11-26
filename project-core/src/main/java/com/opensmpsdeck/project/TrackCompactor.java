@@ -238,7 +238,7 @@ final class TrackCompactor {
             if (bestLength == 0) continue;
             var subroutine = new Subroutine(start, bestLength, bodies.size());
             write(bodies, events, start, bestLength);
-            bodies.put(target == TargetGame.S3K ? SmpsCoordFlags.RETURN : 0xE3);
+            bodies.put(target.s3kRules() ? SmpsCoordFlags.RETURN : 0xE3);
             markCall(start, subroutine, subroutines, used);
             markCall(bestOther, subroutine, subroutines, used);
             // The representative is now reserved; compare later occurrences only

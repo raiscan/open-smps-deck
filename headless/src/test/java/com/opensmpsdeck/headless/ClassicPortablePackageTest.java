@@ -382,7 +382,7 @@ class ClassicPortablePackageTest {
             var source = project(NativeCommand.DETUNE, 72).withTarget(game);
             var expected = new Observation();
             var actual = new Observation();
-            if (game == TargetGame.S3K) {
+            if (game.s3kRules()) {
                 S3kRenderer.render(ProjectCompiler.compileWithAssets(source), 32, expected::capture, expected);
             } else {
                 var driver = ClassicPackageDriver.valueOf(game.name());

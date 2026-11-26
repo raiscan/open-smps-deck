@@ -70,7 +70,7 @@ final class ReconstructionBendEncoding {
             desired[i] = bend.cents(midpoint);
         }
         int pitch = note.pitch();
-        double base = linear(profile.game() == TargetGame.S3K ? packed(new Pitch(pitch, detune))
+        double base = linear(profile.game().s3kRules() ? packed(new Pitch(pitch, detune))
                 : frequencies(new Fit(Mode.E7, List.of(new NoteEvent("base", 0, duration, pitch)),
                         List.of(new CommandEvent("detune", 0, NativeCommand.DETUNE, List.of(detune & 255))), 0),
                         voice, duration, profile)[0]);
@@ -290,7 +290,7 @@ final class ReconstructionBendEncoding {
                 fit.notes(), fit.commands(), "RESET");
         var probe = new StudioProject(4, "Bend probe", "S3K", 30, 0, List.of(voice),
                 List.of(sequence), List.of(new Clip("probe", sequence.id(), "FM1", 0, duration)), profile.game(),
-                profile.game() == TargetGame.S3K ? null : clock.tempo());
+                profile.game().s3kRules() ? null : clock.tempo());
         var trace = new FrequencyTrace();
         int lastFrame = (int) clock.frameAtTick(duration - 1);
         int[] packed = new int[duration];
