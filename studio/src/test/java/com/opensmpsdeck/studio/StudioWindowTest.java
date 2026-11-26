@@ -348,7 +348,7 @@ class StudioWindowTest {
             fx(() -> {
                 var picker = (ComboBox<?>) scene.lookup("#suno-import-target");
                 assertEquals(TargetGame.S3K, picker.getValue());
-                assertEquals(List.of(TargetGame.S1, TargetGame.S2, TargetGame.S3K), picker.getItems());
+                assertEquals(List.of(TargetGame.S1, TargetGame.S2, TargetGame.S3K, TargetGame.CANDESCENCE), picker.getItems());
                 picker.getSelectionModel().select(0);
                 return null;
             });
