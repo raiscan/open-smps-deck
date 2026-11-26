@@ -115,7 +115,7 @@ final class ReconstructionVoiceStage {
         var screening = new VoicePatchShortlist(catalogue, options.target());
         var leadPatches = new HashMap<String, VoicePatchShortlist.Ranking>();
         // Only an S3K source part with a stem of its own has attacks to settle a challenge.
-        java.util.function.Predicate<String> challenged = id -> shared && options.target() == TargetGame.S3K
+        java.util.function.Predicate<String> challenged = id -> shared && options.target().s3kRules()
                 && challengeable(id, vocalGroup, fitGroups.get(id).getFirst().note().part(), options.stems(), mix);
         var unsupported = new ArrayList<String>();
         for (var focus : foreground.entrySet()) {
@@ -196,7 +196,7 @@ final class ReconstructionVoiceStage {
                         pool.retainAll(ReconstructionHeldNotes.fittingPatches(catalogue, score.profile(), both, examples));
                     }
                 }
-                if (instrument && options.target() == TargetGame.S3K) {
+                if (instrument && options.target().s3kRules()) {
                     int part = entry.getValue().getFirst().note().part();
                     var stem = options.stems().get(part);
                     if (stem != null && !mix.equals(stem)) {

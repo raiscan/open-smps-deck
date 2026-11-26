@@ -143,7 +143,7 @@ public final class CataloguePlayback {
         install.sequences.add(probe);
         install.clips.add(new Clip("probe-clip", probe.id(), lane, 0, probe.lengthTicks()));
         StudioProject result = install.finish();
-        if (target != TargetGame.S3K) return result;
+        if (!target.s3kRules()) return result;
         byte[] linear = ProjectCompiler.compile(result, ProjectCompiler.Encoding.LINEAR);
         int frames = ProjectRenderTiming.presentationCount(result);
         if (asset.kind() == Kind.DAC_SAMPLE && recipe.pan() != null && recipe.pan() != 0xC0)
@@ -152,7 +152,7 @@ public final class CataloguePlayback {
     }
 
     private static void requirePlayable(Match match, Recipe recipe, boolean rawAsset, TargetGame target) {
-        if (target != TargetGame.S3K) {
+        if (!target.s3kRules()) {
             for (var event : recipe.commands()) {
                 switch (event.command()) {
                     case FM_VOLUME_ENVELOPE, MODULATION_ENVELOPE, SSG_EG ->
@@ -166,7 +166,7 @@ public final class CataloguePlayback {
                     && probeChip(match, rawAsset).equals("FM"))
                 throw unsupported(target, "FM_VOLUME_ENVELOPE");
         }
-        if (match.variant().target() != target)
+        if (match.variant().target() != target.rulebook())
             throw new IllegalArgumentException("Catalogue variant is for " + match.variant().driver()
                     + "; choose a " + target.id() + " variant.");
     }
@@ -200,7 +200,7 @@ public final class CataloguePlayback {
         var match = catalogue.match(id, target.target());
         // An occurrence-less legacy PSG entry can still be explicitly copied as a raw
         // envelope. The target compiler validates its byte grammar before deployment.
-        boolean rawLegacyEnvelope = match.variant().target() == TargetGame.S3K
+        boolean rawLegacyEnvelope = match.variant().target().s3kRules()
                 && match.asset().kind() == Kind.PSG_VOLUME && match.variant().occurrences().isEmpty();
         if (!rawLegacyEnvelope) requirePlayable(match, recipe(match), false, target.target());
         var install = new Install(catalogue, target);

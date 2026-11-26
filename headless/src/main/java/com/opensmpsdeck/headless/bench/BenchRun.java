@@ -37,7 +37,7 @@ final class BenchRun {
             this(quick, holdout, audioRefine, jobs, gold, goldOnly, rolePlan, steadyTempo, target, false, false);
         }
 
-        boolean classic() { return target != TargetGame.S3K; }
+        boolean classic() { return !target.s3kRules(); }
     }
     private record Song(Path truthFile, List<BenchMetrics.Event> truth, float[] reference, Path index,
                         BenchTimeline.Truth nativeTruth) {}

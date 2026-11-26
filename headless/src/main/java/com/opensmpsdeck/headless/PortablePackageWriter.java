@@ -104,7 +104,7 @@ final class PortablePackageWriter {
                     + "copy-arrangement produces a compiled arrangement; use the embedded export for it.");
             require(retail != null && retail.game().equals(driver.id()), "--retail-patch requires a retail-derived S3K bank");
         }
-        if (nativeProgram != null && !driver.id().equals("s3k"))
+        if (nativeProgram != null && !(driver instanceof S3kPackageDriver))
             throw new IllegalArgumentException(driver.id() + ": native v5 banks are S3K-only");
         int tempo = project.tempo();
         Integer speedUpTempo = options.speedUpTempo();
@@ -144,7 +144,7 @@ final class PortablePackageWriter {
             if (driver == ClassicPackageDriver.S2) {
                 if (origin != null && origin.ref() != null && origin.ref().game().equals("s2"))
                     origin = ClassicPackageDriver.swapVoicePatchOffsets(origin);
-                else if (origin == null && StockTable.match("FM_VOICE", bytes, driver.id()) == null
+                else if (origin == null && StockTable.match("FM_VOICE", bytes, driver.stockGame()) == null
                         && StockTable.matchProjectAsset("FM_VOICE", editable) != null)
                     origin = AssetOrigin.stock(null);
             }
@@ -171,7 +171,7 @@ final class PortablePackageWriter {
             for (int offset = 0; offset <= original.length - 25; offset++) {
                 if (localCount > 0 && offset < localStart + localCount * 25 && offset + 25 > localStart) continue;
                 byte[] bytes = Arrays.copyOfRange(original, offset, offset + 25);
-                var ref = StockTable.match("FM_VOICE", bytes, driver.id());
+                var ref = StockTable.match("FM_VOICE", bytes, driver.stockGame());
                 if (ref == null) continue;
                 addBankVoice(original, track, offset, "bank-voice-" + offset, "Bank FM " + offset);
                 offset += 24;
@@ -334,7 +334,7 @@ final class PortablePackageWriter {
         boolean classicWithoutLocator = driver instanceof ClassicPackageDriver && declared != null
                 && declared.type().equals("stock") && declared.ref() == null;
         if (declared == null || classicWithoutLocator) {
-            var ref = StockTable.match(kind.name(), bytes, driver.id());
+            var ref = StockTable.match(kind.name(), bytes, driver.stockGame());
             if (ref != null) {
                 origin = AssetOrigin.stock(ref);
                 if (declared == null) {
@@ -346,13 +346,13 @@ final class PortablePackageWriter {
             }
         }
         if (origin != null && origin.type().equals("stock") && origin.ref() != null
-                && !origin.ref().game().equals(driver.id())) {
-            var match = StockTable.match(kind.name(), bytes, driver.id());
+                && !origin.ref().game().equals(driver.stockGame())) {
+            var match = StockTable.match(kind.name(), bytes, driver.stockGame());
             if (match != null) origin = AssetOrigin.stock(match);
         }
         if (origin != null && origin.type().equals("stock") && origin.ref() != null) {
             var transforms = origin.transforms() == null ? List.<AssetOrigin.Transform>of() : origin.transforms();
-            if (origin.ref().game().equals(driver.id()) && (!transforms.isEmpty() || origin.ref().sha256().equals(StockTable.hash(bytes)))) {
+            if (origin.ref().game().equals(driver.stockGame()) && (!transforms.isEmpty() || origin.ref().sha256().equals(StockTable.hash(bytes)))) {
                 var asset = new Asset(key, kind, id, name, Origin.of(origin), origin.ref(), transforms,
                         transforms.isEmpty() ? null : StockTable.hash(bytes), null, null, null);
                 assets.add(asset);

@@ -55,7 +55,7 @@ public final class CatalogueMatcher {
     }
 
     static String assetProfile(TargetGame target) {
-        return target.id() + "-ntsc-match-assets-v2";
+        return target.rulebook().id() + "-ntsc-match-assets-v2";
     }
 
     static Report matchAssets(InstrumentCatalogue index, ReferenceAudio audio, Options options) throws IOException {
@@ -82,12 +82,12 @@ public final class CatalogueMatcher {
         var ranked = new ArrayList<Ranked>();
         var skipped = new ArrayList<Skipped>();
         var emitted = new HashSet<EmittedAsset>();
-        Set<String> trackData = target == TargetGame.S3K && rawAssets && options.kind() == Kind.FM_VOICE ? inferredAzureLakeSlots(index) : Set.of();
+        Set<String> trackData = target.s3kRules() && rawAssets && options.kind() == Kind.FM_VOICE ? inferredAzureLakeSlots(index) : Set.of();
         int total;
         int eligible = 0;
         int offset = 0;
         do {
-            var query = new InstrumentCatalogue.Query(null, options.kind(), target.id(), options.role(),
+            var query = new InstrumentCatalogue.Query(null, options.kind(), target.rulebook().id(), options.role(),
                     options.source(), null, offset, InstrumentCatalogue.PAGE_LIMIT);
             var page = index.search(query);
             total = page.total();
@@ -115,7 +115,7 @@ public final class CatalogueMatcher {
 
         ranked.sort(Comparator.comparingDouble((Ranked row) -> row.distance().total())
                 .thenComparing(Ranked::variantId));
-        return new Report(InstrumentCatalogue.FORMAT_VERSION, rawAssets ? assetProfile(target) : target.id() + "-ntsc-match-v1", options.midi(), gate, seconds, eligible,
+        return new Report(InstrumentCatalogue.FORMAT_VERSION, rawAssets ? assetProfile(target) : target.rulebook().id() + "-ntsc-match-v1", options.midi(), gate, seconds, eligible,
                 ranked.size(), reference.summary(), ranked.subList(0, Math.min(options.limit(), ranked.size())), skipped);
     }
 

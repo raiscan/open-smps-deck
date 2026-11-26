@@ -344,6 +344,7 @@ class ReconstructionCliTest {
         Path staged = directory.resolve("target-s3k");
         Path classic = directory.resolve("target-s1");
         Path sonic2 = directory.resolve("target-s2");
+        Path candescence = directory.resolve("target-candescence");
         Path replay = directory.resolve("target-replay");
         Path imported = directory.resolve("target-import");
         var errors = new ByteArrayOutputStream();
@@ -362,14 +363,15 @@ class ReconstructionCliTest {
                 case S3K -> staged;
                 case S1 -> classic;
                 case S2 -> sonic2;
+                case CANDESCENCE -> candescence;
             };
             assertEquals(0, Main.run(new String[]{"reconstruct", "run", midi.toString(), wav.toString(),
                     index.toString(), work.toString(), "--seconds", ".5", "--fm-only", "--lane-policy-preset", "off",
                     "--target", target.id()}, System.out, err), errors.toString());
             var project = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
             assertEquals(target, project.target());
-            assertEquals(target == TargetGame.S3K ? null : 255, project.nativeTempo());
-            if (target != TargetGame.S3K) {
+            assertEquals(target.s3kRules() ? null : 255, project.nativeTempo());
+            if (!target.s3kRules()) {
                 var report = artifact(work, "report.json");
                 assertEquals(target.id() + "-ntsc-match-assets-v2", report.get("matcher").getAsString());
                 var selected = report.getAsJsonArray("matches").asList().stream()
@@ -391,6 +393,18 @@ class ReconstructionCliTest {
         }
         assertFalse(artifact(staged, "score.json").getAsJsonObject("inputs").has("target"));
         assertFalse(artifact(staged, "manifest.json").getAsJsonObject("options").has("target"));
+        // Candescence keeps its own identity but follows the S3K rulebook byte for byte.
+        assertEquals("candescence", artifact(candescence, "score.json").getAsJsonObject("inputs").get("target").getAsString());
+        assertEquals("candescence", artifact(candescence, "manifest.json").getAsJsonObject("options").get("target").getAsString());
+        assertEquals("candescence", artifact(candescence, "arrangement.smps.json").get("target").getAsString());
+        assertEquals(-1, Files.mismatch(staged.resolve("render.wav"), candescence.resolve("render.wav")));
+        var s3kProject = ProjectFiles.load(staged.resolve("arrangement.smps.json")).project();
+        var candescenceProject = ProjectFiles.load(candescence.resolve("arrangement.smps.json")).project();
+        assertEquals(TargetGame.CANDESCENCE, candescenceProject.target());
+        assertEquals(s3kProject.voices(), candescenceProject.voices());
+        assertEquals(s3kProject.sequences(), candescenceProject.sequences());
+        assertArrayEquals(ProjectCompiler.compileWithAssets(s3kProject).song(),
+                ProjectCompiler.compileWithAssets(candescenceProject).song());
         assertTrue(ProjectFiles.load(staged.resolve("arrangement.smps.json")).project().voices().stream()
                 .allMatch(v -> v.origin().isStock()));
         assertEquals("c113fbbd7ac4e9dac388a500a43784f0d0eb3e81fd13b84f47603565d2f1352f",

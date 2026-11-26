@@ -84,7 +84,7 @@ final class ReconstructionCymbals {
 
     static int detune(int period, TargetProfile profile) {
         // The pinned classic 68K-frequency table ends at MIDI 116 with period 17.
-        int basePeriod = profile.game() == TargetGame.S3K ? TONE_PERIOD : 17;
+        int basePeriod = profile.game().s3kRules() ? TONE_PERIOD : 17;
         return period - basePeriod;
     }
 
@@ -228,7 +228,7 @@ final class ReconstructionCymbals {
      * itself rather than those steps. Null for non-S3K targets.
      */
     static float[] renderHit(boolean closed, boolean dualClock, TargetProfile profile) {
-        if (profile.game() != TargetGame.S3K) return null;
+        if (!profile.game().s3kRules()) return null;
         var hat = ReconstructionVoicing.PSG_PERCUSSION.withHatDefaults();
         return HITS.computeIfAbsent(List.of(profile, closed, dualClock), ignored -> {
             var envelope = closed ? CLOSED : OPEN;
@@ -284,7 +284,7 @@ final class ReconstructionCymbals {
         static final Map<TargetProfile, Map<String, double[]>> LEVELS = new java.util.concurrent.ConcurrentHashMap<>();
 
         private static double[] render(Envelope envelope, TargetProfile profile) {
-            boolean classic = profile.game() != TargetGame.S3K;
+            boolean classic = !profile.game().s3kRules();
             var clock = profile.clock().game() == profile.game()
                     ? profile.clock() : TargetProfile.of(profile.game()).clock();
             int spacing = 16;

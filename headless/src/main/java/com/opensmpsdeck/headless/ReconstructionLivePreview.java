@@ -240,7 +240,7 @@ public final class ReconstructionLivePreview {
         var right = after.compiled();
         if (!left.envelopes().equals(right.envelopes()) || !left.samples().equals(right.samples())) return false;
         if (Arrays.equals(left.song(), right.song())) return true;
-        if (before.target() != TargetGame.S3K) return false;
+        if (!before.target().s3kRules()) return false;
         var prefix = S3kProgramPrefix.between(left, right);
         return prefix != null && prefix.equivalent();
     }

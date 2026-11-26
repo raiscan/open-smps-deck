@@ -317,7 +317,7 @@ final class ReconstructionEditor implements AutoCloseable {
         lanePolicies.setId("reconstruction-lane-policies");
         var target = snapshot.inspection().target();
         var layering = new MenuItem(target.name() + " layering");
-        layering.setOnAction(event -> apply(target.id() + "-layering"));
+        layering.setOnAction(event -> apply(target.rulebook().id() + "-layering"));
         var off = new MenuItem("Off");
         off.setOnAction(event -> apply("off"));
         lanePolicies.getItems().setAll(layering, off);
@@ -1159,7 +1159,7 @@ final class ReconstructionEditor implements AutoCloseable {
                         ? null : "Select one tonal attack or two different pitches in the same part at least four ticks apart."),
                         () -> pitchMotion(notes))
                 .add("Vibrato…", null, editIssue(notes.size() == 1 && hit.sounds() && hit.lane() != null
-                        && hit.lane().startsWith("FM") && model.target() == com.opensmpsdeck.project.TargetGame.S3K
+                        && hit.lane().startsWith("FM") && model.target().s3kRules()
                         ? null : "Select a single allocated S3K FM note."), () -> setVibrato(hit));
         menu.submenu("Pin to lane", TimelineView.LANES.stream().filter(value -> !notes.isEmpty()).map(value -> {
             String issue = notes.stream().map(note -> snapshot.editing().laneIssue(note, null, value))

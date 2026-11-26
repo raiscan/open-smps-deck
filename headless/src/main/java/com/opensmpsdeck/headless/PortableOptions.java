@@ -28,7 +28,7 @@ record PortableOptions(String driver, boolean includeSource, String license, Str
         replacements = List.copyOf(replacements);
         roms = List.copyOf(roms);
         PackageDriver.supported(driver);
-        if (speedUpTempo != null && (driver.equals("s3k") || speedUpTempo < 0 || speedUpTempo > 255))
+        if (speedUpTempo != null && (PackageDriver.supported(driver) instanceof S3kPackageDriver || speedUpTempo < 0 || speedUpTempo > 255))
             throw new IllegalArgumentException("speedUpTempo requires driver s1 or s2 and an S3K tempo byte in 0..255");
     }
     static final PortableOptions DEFAULT = defaults(TargetGame.S3K);
@@ -39,7 +39,7 @@ record PortableOptions(String driver, boolean includeSource, String license, Str
 
     com.google.gson.JsonObject driverOptions(Integer nativeSpeedUpTempo) {
         var options = new com.google.gson.JsonObject();
-        if (!driver.equals("s3k")) options.addProperty("speedUpTempo", nativeSpeedUpTempo);
+        if (!(PackageDriver.supported(driver) instanceof S3kPackageDriver)) options.addProperty("speedUpTempo", nativeSpeedUpTempo);
         return options;
     }
 

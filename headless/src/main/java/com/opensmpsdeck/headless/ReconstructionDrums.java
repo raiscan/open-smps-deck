@@ -30,7 +30,7 @@ final class ReconstructionDrums {
         static KitMode forTarget(String value, TargetGame target) {
             if (value == null) return null;
             var kit = parse(value);
-            if (target == TargetGame.S3K && kit == stock)
+            if (target.s3kRules() && kit == stock)
                 throw new IllegalArgumentException("--drum-kit stock is available for s1 and s2");
             return kit;
         }
@@ -116,7 +116,7 @@ final class ReconstructionDrums {
 
     static boolean isTargetStock(DacSample sample, TargetGame target) {
         return sample != null && sample.origin() != null && sample.origin().ref() != null
-                && sample.origin().ref().game().equals(target.id()) && sample.origin().ref().table().equals("dac")
+                && sample.origin().ref().game().equals(target.rulebook().id()) && sample.origin().ref().table().equals("dac")
                 && (sample.origin().transforms() == null || sample.origin().transforms().isEmpty());
     }
 
@@ -180,7 +180,7 @@ final class ReconstructionDrums {
         var kitVotes = new HashMap<Integer, InstrumentCatalogue.Match>();
         var noiseVotes = new HashSet<Integer>();
         var audioOnly = score.inputs().audioOnly();
-        if (audioOnly != null && audioOnly.drumDetector().metadata() != null && profile.game() == TargetGame.S3K
+        if (audioOnly != null && audioOnly.drumDetector().metadata() != null && profile.game().s3kRules()
                 && (source == null || source == Source.catalogue)) {
             var metadata = audioOnly.drumDetector().metadata();
             if ("2".equals(metadata.get("kitRetrievalVersion"))) {

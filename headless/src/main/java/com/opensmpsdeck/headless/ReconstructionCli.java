@@ -45,7 +45,7 @@ final class ReconstructionCli {
             this(durationUs, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine, stems, target, null);
         }
 
-        boolean stockDrums() { return target != TargetGame.S3K && drumKit != ReconstructionDrums.KitMode.custom; }
+        boolean stockDrums() { return !target.s3kRules() && drumKit != ReconstructionDrums.KitMode.custom; }
         Options(Long durationUs, String name, int ticksPerBeat, boolean keepOctaves, boolean fmOnly,
                 boolean wholePartVoices, boolean audioRefine, Map<Integer, Path> stems) {
             this(durationUs, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine, stems, TargetGame.S3K);
@@ -111,14 +111,14 @@ final class ReconstructionCli {
         ReconstructionBranchCommand.usage(out);
         out.println("       reconstruct separate MIX OUT_DIR --separator NAME [--device auto|cpu|rocm|cuda]");
         out.println("           [--separator-config FILE]");
-        out.println("       reconstruct import FOLDER WORK_DIR [--target s1|s2|s3k] [--drum-kit stock|custom] [--assign FILE=PART ...] [--exclude FILE ...]");
+        out.println("       reconstruct import FOLDER WORK_DIR [--target s1|s2|s3k|candescence] [--drum-kit stock|custom] [--assign FILE=PART ...] [--exclude FILE ...]");
         out.println("           [--catalogue INDEX.json] [--transcribe-unmapped NAME] [--run]");
-        out.println("       reconstruct import FOLDER WORK_DIR --audio-only [--target s1|s2|s3k] [--transcriber NAME] [--transcriber-for ROLE=NAME ...]");
+        out.println("       reconstruct import FOLDER WORK_DIR --audio-only [--target s1|s2|s3k|candescence] [--transcriber NAME] [--transcriber-for ROLE=NAME ...]");
         out.println("           [--transcriber-config FILE] [--stem-role FILE=ROLE] [--run]");
         out.println("       reconstruct run|transcribe --audio-only WAV INDEX.json WORK_DIR --stem LABEL=WAV [options]");
         out.println("         [--stem-role LABEL=ROLE ...] [--drum-detector NAME] [--transcriber NAME]");
         out.println("       reconstruct run|transcribe MIDI WAV INDEX.json WORK_DIR [options]");
-        out.println("           [--target s1|s2|s3k] [--candidates NOTES.json] [--harmony-max-hz RATE] [--lead-part PART] [--no-fast-runs]");
+        out.println("           [--target s1|s2|s3k|candescence] [--candidates NOTES.json] [--harmony-max-hz RATE] [--lead-part PART] [--no-fast-runs]");
         out.println("           [--no-stem-template-notes]");
         out.println("           [--lane-policy-preset s1-layering|s2-layering|s3k-layering|off] [--separator-config FILE] (also on import)");
         out.println("           [--transcriber NAME --transcribe-part PART=ROLE ... --stem PART=WAV ...]");
@@ -143,7 +143,7 @@ final class ReconstructionCli {
         out.println("       reconstruct trace WORK_DIR [--by-onset] [--start S] [--end S] [--time source|project] [--part N] [--lane LANE]");
         out.println("           [--pitch P | --pitch-min P --pitch-max P] [--status STATUS] [--json]");
         out.println("       reconstruct trace-diff OLD_WORK_DIR NEW_WORK_DIR [--span START,END] [--json]");
-        out.println("       reconstruct rerun WORK_DIR NEW_WORK_DIR [--target s1|s2|s3k] [--search DIR ...] [--keep-voicing] [--overwrite-detached]");
+        out.println("       reconstruct rerun WORK_DIR NEW_WORK_DIR [--target s1|s2|s3k|candescence] [--search DIR ...] [--keep-voicing] [--overwrite-detached]");
         out.println("       reconstruct plan-template WORK_DIR [--out FILE]");
         out.println("       reconstruct sections WORK_DIR | sections add|set|remove|rename WORK_DIR JSON");
         out.println("       reconstruct vibrato-review WORK_DIR [--part ID] [--propose]");
@@ -158,7 +158,7 @@ final class ReconstructionCli {
         out.println("           [--gain MULTIPLIER] [--solo|--in-mix] [--reference WAV] [--rms-json FILE] OUT.wav");
         out.println("       reconstruct run --from STAGE WORK_DIR [--harmony-max-hz RATE] [--keep-voicing] [--overwrite-detached]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar reconstruct MIDI WAV INDEX.json OUTPUT_DIR");
-        out.println("           [--target s1|s2|s3k] [--drum-kit stock|custom] [--seconds N] [--name NAME] [--ticks-per-beat N] [--keep-octaves] [--fm-only] [--whole-part-voices] [--audio-refine] [--stem PART=WAV]...");
+        out.println("           [--target s1|s2|s3k|candescence] [--drum-kit stock|custom] [--seconds N] [--name NAME] [--ticks-per-beat N] [--keep-octaves] [--fm-only] [--whole-part-voices] [--audio-refine] [--stem PART=WAV]...");
     }
 
     static void run(String[] args, PrintStream out) throws IOException {
@@ -870,7 +870,7 @@ final class ReconstructionCli {
                 out.println(options.target().name() + " bank fit omitted " + removed + " lower-priority backing attacks");
             }
             if (timeline.warped()) ReferenceStretch.write(reference, aligned, frames, timeline.sourceDuration(), timeline::source);
-            if (options.target() == TargetGame.S3K) {
+            if (options.target().s3kRules()) {
                 ProjectPackage.write(result.project(), packagePath);
             } else {
                 PortablePackageWriter.write(result.project(), packagePath, PortableOptions.defaults(options.target()));
@@ -907,11 +907,11 @@ final class ReconstructionCli {
             if (transcription.retriggers() != null)
                 for (var burst : transcription.retriggers()) runEvidence.add(burst.figure());
             var assembled = result.project();
-            if (options.target() != TargetGame.S3K && assembled.samples().stream()
+            if (!options.target().s3kRules() && assembled.samples().stream()
                     .anyMatch(sample -> !ReconstructionDrums.isTargetStock(sample, options.target()))) {
                 out.println("Warning: Test in game may approximate custom PCM drums on " + options.target().name() + ".");
             }
-            var legacySustain = assemblyInputs == null && options.target() == TargetGame.S3K
+            var legacySustain = assemblyInputs == null && options.target().s3kRules()
                     ? matchQuietly(() -> ReconstructionSustain.inspect(assembled)) : null;
             var report = new Report(REPORT_VERSION, CatalogueMatcher.assetProfile(options.target()), durationUs, frames, playback.compiled().song().length,
                     noteCounts.values().stream().mapToInt(Integer::intValue).sum(), result.fmNotes(), result.psgNotes(),
@@ -931,7 +931,7 @@ final class ReconstructionCli {
                     result.arpeggioExtraNoteBytes(), result.psgEnvelopes());
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             var reportJson = json.toJsonTree(report).getAsJsonObject();
-            if (options.target() != TargetGame.S3K)
+            if (!options.target().s3kRules())
                 reportJson.addProperty("drumKit", options.stockDrums() ? "stock" : "custom");
             if (!result.layers().isEmpty()) reportJson.add("noteLayers", json.toJsonTree(result.layers()));
             if (!result.lanePolicyCopies().isEmpty())
@@ -1073,7 +1073,7 @@ final class ReconstructionCli {
 
     static TargetGame parseTargetAssertion(String[] args) {
         if (args.length != 2 || !args[0].equals("--target"))
-            throw new IllegalArgumentException("Unsupported options when resuming reconstruction; expected --target s1|s2|s3k");
+            throw new IllegalArgumentException("Unsupported options when resuming reconstruction; expected --target s1|s2|s3k|candescence");
         return TargetGame.parse(args[1]);
     }
 

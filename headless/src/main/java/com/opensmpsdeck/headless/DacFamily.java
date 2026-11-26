@@ -12,7 +12,7 @@ enum DacFamily {
     private static final Set<Integer> S3K_MIX_KICKS = Set.of(0x86, 0x9d, 0xa4, 0xa7, 0xa8, 0xbd);
 
     static DacFamily slot(TargetGame target, int slot) {
-        if (target == TargetGame.S3K) return valueOf(S3kDacFamily.slot(slot).name());
+        if (target.s3kRules()) return valueOf(S3kDacFamily.slot(slot).name());
         return switch (stockName(target, slot)) {
             case "kick" -> KICK;
             case "snare" -> SNARE;
@@ -40,14 +40,14 @@ enum DacFamily {
 
     static DacFamily occurrence(TargetGame target, InstrumentCatalogue.Occurrence usage) {
         if (usage.slot() == null || !"dac".equals(usage.table())) return OTHER;
-        if (target == TargetGame.S3K) {
+        if (target.s3kRules()) {
             return CatalogueMatcher.LOCKED_ON_S3K.equals(usage.revision()) ? slot(target, usage.slot()) : OTHER;
         }
         return target.name().equalsIgnoreCase(usage.driver()) ? slot(target, usage.slot()) : OTHER;
     }
 
     static boolean corroboratedKick(TargetGame target, InstrumentCatalogue.Occurrence usage) {
-        if (target != TargetGame.S3K) return occurrence(target, usage) == KICK;
+        if (!target.s3kRules()) return occurrence(target, usage) == KICK;
         return CatalogueMatcher.LOCKED_ON_S3K.equals(usage.revision()) && "S3K".equals(usage.driver())
                 && "dac".equals(usage.table()) && usage.slot() != null && S3K_MIX_KICKS.contains(usage.slot());
     }

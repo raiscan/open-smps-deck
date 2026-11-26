@@ -38,7 +38,7 @@ final class ReconstructionLanePolicies {
     static final Set<String> PRESETS = Set.of(S3K_LAYERING, "s1-layering", "s2-layering");
 
     static String defaultPreset(TargetGame game) {
-        return game.id() + "-layering";
+        return game.rulebook().id() + "-layering";
     }
 
     private static final String FIELD = "voicing.json.lanePolicies";
@@ -300,7 +300,7 @@ final class ReconstructionLanePolicies {
                     probe.psg() == null ? List.of() : List.of(ReconstructionPsgEnvelopes.forProbe(probe.psg(), profile.game(),
                             probe.ticks(), classicEnvelopes.contains(asset))),
                     List.of(), profile.game(),
-                    profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());
+                    profile.clock().game().s3kRules() ? null : profile.clock().tempo());
             var loudness = new KWeightedLevel();
             TargetPlayback.prepare(project).render((int) project.clock().frameAtTick(probe.ticks()), pcm -> {
                 for (int i = 0; i < pcm.length; i += 2) loudness.add(pcm[i] / 32768.0, pcm[i + 1] / 32768.0);

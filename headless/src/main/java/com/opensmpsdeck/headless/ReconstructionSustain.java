@@ -134,7 +134,7 @@ final class ReconstructionSustain {
         for (byte value : bytes) patch.add(Byte.toUnsignedInt(value));
         var profile = score.profile();
         return probe(heldTicks(entry, lane), note.pitch(), volume, patch, profile.game(),
-                profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());
+                profile.clock().game().s3kRules() ? null : profile.clock().tempo());
     }
 
     private static List<Double> probe(int duration, int pitch, int volume, List<Integer> patch, TargetGame target, Integer nativeTempo) throws IOException {

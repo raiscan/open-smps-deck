@@ -415,11 +415,19 @@ headless live replay and verify full-song PCM against a canonical rebuild.
 See the [live-edit benchmark](../docs/architecture/benchmark.md#live-edit-latency-and-parity)
 for options.
 
-Set `--target s1|s2|s3k` on `reconstruct import`, `run`, or `transcribe`
-to choose the game before analysis. The default is `s3k`. Import includes
+Set `--target s1|s2|s3k|candescence` on `reconstruct import`, `run`, or
+`transcribe` to choose the game before analysis. The default is `s3k`. Import includes
 the selected target in its runnable request. Subsequent stages and
 `reconstruct rerun` inherit the saved target. You can also pass `--target`
 to those commands to assert the saved choice.
+
+`candescence` is the target for songs bound for Candescence, a game that reuses
+the OpenGGF sound synthesiser. For now it follows the stock S3K rulebook: same
+channels, limits, instruments and bytecode, so its renders match S3K byte for
+byte. Projects, reconstructions and portable packages still record
+`candescence`, so its rules can diverge from S3K later. Test in game previews
+a Candescence song in S3K. Mod and disassembly-kit exports patch retail games,
+so they are not offered for Candescence.
 
 S1 and S2 reconstruction use the selected driver's NTSC duration clock.
 Notes are placed at the nearest playable presentation, accounting for the
@@ -1607,9 +1615,9 @@ java -jar "$deck_jar" export PROJECT.smps.json replacement.jar --format mod --dr
 ```
 
 Portable exports include redacted source by default. Pass `--no-source`
-to omit it. Choose `--driver s1|s2|s3k` for an editable arrangement.
+to omit it. Choose `--driver s1|s2|s3k|candescence` for an editable arrangement.
 The `export` command and Studio use the project target by default.
-Native v5 banks support `s3k`. S1 and S2
+Native v5 banks support `s3k` and `candescence`. S1 and S2
 preserve the S3K duration tick rate as closely as their native clocks allow.
 `--speed-up-tempo BYTE` (decimal 0–255) uses the S3K clock for the optional
 gameplay speed-shoes tempo, then converts it to a native manifest byte.

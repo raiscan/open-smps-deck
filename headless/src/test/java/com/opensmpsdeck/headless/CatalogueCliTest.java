@@ -103,7 +103,7 @@ class CatalogueCliTest {
         var source = new Sequence("tone", "Tone", "FM", 12, voice.id(), 127,
                 List.of(new NoteEvent("note", 0, 12, 60)));
         var clip = new Clip("tone-clip", source.id(), "FM1", 0, 12);
-        for (var target : TargetGame.values()) {
+        for (var target : List.of(TargetGame.S1, TargetGame.S2, TargetGame.S3K)) {
             var project = new StudioProject(4, target.id(), "S3K", 24, 0, List.of(voice),
                     List.of(source), List.of(clip), target, null);
             ProjectFiles.save(rips.resolve(target.id() + ".smps.json"), project, null);
@@ -117,7 +117,7 @@ class CatalogueCliTest {
         var catalogue = InstrumentCatalogue.open(index);
         assertEquals(1, catalogue.assets().size());
         assertEquals(3, catalogue.variants().size());
-        for (var target : TargetGame.values()) {
+        for (var target : List.of(TargetGame.S1, TargetGame.S2, TargetGame.S3K)) {
             var results = json("search", index.toString(), "--target", target.id());
             assertEquals(1, results.get("total").getAsInt());
             var summary = results.getAsJsonArray("items").get(0).getAsJsonObject();

@@ -89,7 +89,7 @@ public final class CheckpointPlayback {
     public CheckpointPlayback revise(TargetPlayback replacement, int cutoff) throws InterruptedIOException {
         var next = replacement.checkpoints();
         // A changed classic bank starts a new grid. The relocation proof covers S3K packing.
-        if (playback.target() != TargetGame.S3K || replacement.target() != TargetGame.S3K) return next;
+        if (!playback.target().s3kRules() || !replacement.target().s3kRules()) return next;
         var prefix = S3kProgramPrefix.between(playback.compiled(), replacement.compiled());
         if (prefix == null) return next;
         for (var entry : before(cutoff)) {

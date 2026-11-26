@@ -96,7 +96,7 @@ final class ReconstructionCompiledTimeline extends Sonic3kCoordFlagHandler imple
         var playback = TargetPlayback.prepare(project);
         var recorder = new ReconstructionCompiledTimeline(playback.compiled(), time, span);
         var sequencer = playback.timeline(() -> {}, recorder);
-        boolean classic = playback.target() != TargetGame.S3K;
+        boolean classic = !playback.target().s3kRules();
         sequencer.setNoteListener(recorder);
         // Include the stop immediately after the final gate.
         int endTick = project.clips().stream().mapToInt(clip -> clip.startTick() + clip.lengthTicks()).max().orElse(0);

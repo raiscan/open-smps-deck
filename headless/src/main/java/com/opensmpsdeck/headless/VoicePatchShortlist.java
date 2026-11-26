@@ -66,10 +66,10 @@ final class VoicePatchShortlist {
 
     /** One variant of each stock FM patch the target can play, in a stable order. */
     static List<InstrumentCatalogue.Variant> stockVoices(InstrumentCatalogue catalogue, TargetGame target) {
-        var seen = target == TargetGame.S3K
+        var seen = target.s3kRules()
                 ? new HashSet<>(CatalogueMatcher.inferredAzureLakeSlots(catalogue)) : new HashSet<String>();
         return catalogue.variants().stream().sorted(Comparator.comparing(InstrumentCatalogue.Variant::id))
-                .filter(variant -> variant.target() == target)
+                .filter(variant -> variant.target() == target.rulebook())
                 .filter(variant -> catalogue.asset(variant.assetId()).kind() == FM_VOICE && seen.add(variant.assetId()))
                 .toList();
     }

@@ -52,7 +52,7 @@ public final class ReconstructionVibratoEnvelope {
 
     public static JsonObject review(Path work, Integer part, boolean propose) throws IOException {
         var score = ReconstructionStages.readScore(work.resolve("score.json"));
-        require(score.profile().game() == TargetGame.S3K, GROUP, "vibratoEnvelope requires the S3K target");
+        require(score.profile().game().s3kRules(), GROUP, "vibratoEnvelope requires the S3K target");
         require(part == null || score.source().parts().stream().anyMatch(p -> p.id() == part),
                 GROUP, "unknown part");
         var time = ReconstructionTimeMap.of(score);
